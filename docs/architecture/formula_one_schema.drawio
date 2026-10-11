@@ -1,0 +1,209 @@
+<mxfile host="65bd71144e">
+    <diagram id="T1QAVG56TEkIbFDyJbP5" name="Page-1">
+        <mxGraphModel dx="2396" dy="1160" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-1" parent="1" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="season" vertex="1">
+                    <mxGeometry height="195" width="200" x="940" y="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-2" parent="PcRn9LTad0zpBXWpxs-e-1" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-3" parent="PcRn9LTad0zpBXWpxs-e-2" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;season_year PK&lt;/b&gt;&lt;div&gt;is_complete&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-8" parent="1" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="location" vertex="1">
+                    <mxGeometry height="195" width="200" x="190" y="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-9" parent="PcRn9LTad0zpBXWpxs-e-8" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-10" parent="PcRn9LTad0zpBXWpxs-e-9" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;location_id PK&lt;/b&gt;&lt;div&gt;source_name&lt;/div&gt;&lt;div&gt;city&lt;/div&gt;&lt;div&gt;country&lt;/div&gt;&lt;div&gt;latitude&lt;/div&gt;&lt;div&gt;longitude&lt;/div&gt;&lt;div&gt;elevation_m&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-11" parent="1" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="circuit" vertex="1">
+                    <mxGeometry height="195" width="200" x="440" y="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-12" parent="PcRn9LTad0zpBXWpxs-e-11" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-13" parent="PcRn9LTad0zpBXWpxs-e-12" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;circuit_id PK&lt;/b&gt;&lt;div&gt;circuit_name&lt;/div&gt;&lt;div&gt;circuit_type&lt;/div&gt;&lt;div&gt;direction&lt;/div&gt;&lt;div&gt;location_id FK&lt;/div&gt;&lt;div&gt;length_km&lt;/div&gt;&lt;div&gt;turns&lt;/div&gt;&lt;div&gt;source_url&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-17" parent="1" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="constructor" vertex="1">
+                    <mxGeometry height="195" width="200" x="1195" y="790" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-18" parent="PcRn9LTad0zpBXWpxs-e-17" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-19" parent="PcRn9LTad0zpBXWpxs-e-18" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;constructor_id PK&lt;/b&gt;&lt;div&gt;constructor_name&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-24" parent="1" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="race" vertex="1">
+                    <mxGeometry height="195" width="200" x="690" y="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-25" parent="PcRn9LTad0zpBXWpxs-e-24" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-26" parent="PcRn9LTad0zpBXWpxs-e-25" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;race_id PK&lt;/b&gt;&lt;div&gt;season_year FK&lt;/div&gt;&lt;div&gt;round&lt;/div&gt;&lt;div&gt;circuit_id FK&lt;/div&gt;&lt;div&gt;race_name&lt;/div&gt;&lt;div&gt;race_date&lt;/div&gt;&lt;div&gt;source_url&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-49" edge="1" parent="1" source="PcRn9LTad0zpBXWpxs-e-25" style="edgeStyle=entityRelationEdgeStyle;html=1;endArrow=ERone;endFill=0;startArrow=ERmany;startFill=0;" target="PcRn9LTad0zpBXWpxs-e-12">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-58" parent="1" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="weather_summary" vertex="1">
+                    <mxGeometry height="410" width="200" x="190" y="340" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-59" parent="PcRn9LTad0zpBXWpxs-e-58" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="380" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-60" parent="PcRn9LTad0zpBXWpxs-e-59" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;race_id PK FK&lt;/b&gt;&lt;div&gt;&lt;b&gt;session_type PK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;air_temp_mean&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;air_temp_min&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;air_temp_max&lt;/span&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;air_temp_std&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;track_temp_mean&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;track_temp_min&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;track_temp_max&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;track_temp_std&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;wind_speed_mean&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;wind_speed_min&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;wind_speed_max&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;wind_speed_std&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;humidity_mean&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;humidity_min&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;humidity_max&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;humidity_std&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;pressure_mean&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;pressure_min&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;pressure_max&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;pressure_std&lt;/span&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;rainfall_any&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;&lt;span style=&quot;color: rgb(63, 63, 63);&quot;&gt;rainfall_mean&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="380" width="200" as="geometry">
+                        <mxRectangle height="380" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-62" parent="1" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="race_control_summary" vertex="1">
+                    <mxGeometry height="247.5" width="200" x="1195" y="340" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-63" parent="PcRn9LTad0zpBXWpxs-e-62" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="218" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-64" parent="PcRn9LTad0zpBXWpxs-e-63" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;race_id PK FK&lt;/b&gt;&lt;div&gt;yellow_flag_probability&lt;/div&gt;&lt;div&gt;double_yellow_probability&lt;/div&gt;&lt;div&gt;red_flag_probability&lt;/div&gt;&lt;div&gt;safety_car_probability&lt;/div&gt;&lt;div&gt;vsc_&lt;span style=&quot;color: rgb(63, 63, 63); background-color: transparent;&quot;&gt;probability&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63); background-color: transparent;&quot;&gt;avg_yellow_count&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63); background-color: transparent;&quot;&gt;avg_double_yellow_count&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63); background-color: transparent;&quot;&gt;avg_red_count&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63); background-color: transparent;&quot;&gt;avg_safety_car_deployments&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63); background-color: transparent;&quot;&gt;avg_vsc_deployments&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63); background-color: transparent;&quot;&gt;avg_safety_car_laps&lt;/span&gt;&lt;/div&gt;&lt;div&gt;&lt;span style=&quot;color: rgb(63, 63, 63); background-color: transparent;&quot;&gt;avg_vsc_laps&lt;/span&gt;&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="218" width="200" as="geometry">
+                        <mxRectangle height="218" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-65" edge="1" parent="1" source="PcRn9LTad0zpBXWpxs-e-63" style="edgeStyle=elbowEdgeStyle;html=1;entryX=0.664;entryY=1.005;entryDx=0;entryDy=0;entryPerimeter=0;elbow=vertical;exitX=-0.001;exitY=0.597;exitDx=0;exitDy=0;exitPerimeter=0;endArrow=ERone;endFill=0;startArrow=ERone;startFill=0;" target="PcRn9LTad0zpBXWpxs-e-25">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1016" y="500"/>
+                        </Array>
+                        <mxPoint x="1190.7999999999997" y="500.7999999999997" as="sourcePoint"/>
+                        <mxPoint x="822.9999999999995" y="295.8250000000003" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-20" parent="1" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="driver" vertex="1">
+                    <mxGeometry height="195" width="200" x="190" y="790" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-21" parent="PcRn9LTad0zpBXWpxs-e-20" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-22" parent="PcRn9LTad0zpBXWpxs-e-21" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;driver_id PK&lt;/b&gt;&lt;div&gt;driver_name&lt;/div&gt;&lt;div&gt;nationality&lt;/div&gt;&lt;div&gt;continent&lt;/div&gt;&lt;div&gt;date_of_birth&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-83" connectable="0" parent="1" style="group" value="" vertex="1">
+                    <mxGeometry height="430" width="660" x="460" y="570" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-30" parent="PcRn9LTad0zpBXWpxs-e-83" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="race_result" vertex="1">
+                    <mxGeometry height="195" width="200" x="20" y="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-31" parent="PcRn9LTad0zpBXWpxs-e-30" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-32" parent="PcRn9LTad0zpBXWpxs-e-31" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;race_id PK FK&lt;/b&gt;&lt;div&gt;&lt;b&gt;driver_id PK FK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;constructor_id FK&lt;/div&gt;&lt;div&gt;finish_position&lt;/div&gt;&lt;div&gt;result_status&lt;/div&gt;&lt;div&gt;points&lt;/div&gt;&lt;div&gt;laps_completed&lt;/div&gt;&lt;div&gt;starting_position&lt;/div&gt;&lt;div&gt;fastest_lap_seconds&lt;/div&gt;&lt;div&gt;fastest_lap_number&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-37" parent="PcRn9LTad0zpBXWpxs-e-83" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="practice_result" vertex="1">
+                    <mxGeometry height="195" width="200" x="230" y="15" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-38" parent="PcRn9LTad0zpBXWpxs-e-37" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-39" parent="PcRn9LTad0zpBXWpxs-e-38" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;race_id PK FK&lt;/b&gt;&lt;div&gt;&lt;b&gt;driver_id PK FK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;constructor_id FK&lt;/div&gt;&lt;div&gt;&lt;b&gt;session_type PK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;best_lap_seconds&lt;/div&gt;&lt;div&gt;lap_count&lt;/div&gt;&lt;div&gt;session_position&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-43" parent="PcRn9LTad0zpBXWpxs-e-83" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="qualifying_result" vertex="1">
+                    <mxGeometry height="195" width="200" x="440" y="15" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-44" parent="PcRn9LTad0zpBXWpxs-e-43" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-45" parent="PcRn9LTad0zpBXWpxs-e-44" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;&lt;b&gt;race_id PK FK&lt;/b&gt;&lt;/span&gt;&lt;div style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgba(168, 169, 170, 0.52) rgb(18, 19, 20);&quot;&gt;&lt;b&gt;driver_id PK FK&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgba(168, 169, 170, 0.52) rgb(18, 19, 20);&quot;&gt;constructor_id FK&lt;/div&gt;&lt;div style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgba(168, 169, 170, 0.52) rgb(18, 19, 20);&quot;&gt;q1_seconds&lt;/div&gt;&lt;div style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgba(168, 169, 170, 0.52) rgb(18, 19, 20);&quot;&gt;q2_seconds&lt;/div&gt;&lt;div style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgba(168, 169, 170, 0.52) rgb(18, 19, 20);&quot;&gt;q3_seconds&lt;/div&gt;&lt;div style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgba(168, 169, 170, 0.52) rgb(18, 19, 20);&quot;&gt;qualifying_position&lt;/div&gt;&lt;div style=&quot;color: rgb(63, 63, 63); scrollbar-color: rgba(168, 169, 170, 0.52) rgb(18, 19, 20);&quot;&gt;qualifying_laps&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-52" parent="PcRn9LTad0zpBXWpxs-e-83" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="pit_stop" vertex="1">
+                    <mxGeometry height="195" width="200" x="20" y="15" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-53" parent="PcRn9LTad0zpBXWpxs-e-52" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-54" parent="PcRn9LTad0zpBXWpxs-e-53" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;race_id PK FK&lt;/b&gt;&lt;div&gt;&lt;b&gt;driver_id PK FK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;constructor_id FK&lt;/div&gt;&lt;div&gt;&lt;b&gt;stop_number PK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;stop_lap&lt;/div&gt;&lt;div&gt;pit_duration_seconds&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-66" parent="PcRn9LTad0zpBXWpxs-e-83" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="driver_session_tire_performance" vertex="1">
+                    <mxGeometry height="195" width="200" x="440" y="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-67" parent="PcRn9LTad0zpBXWpxs-e-66" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-68" parent="PcRn9LTad0zpBXWpxs-e-67" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;race_id PK FK&lt;/b&gt;&lt;div&gt;&lt;b&gt;driver_id PK FK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;b&gt;session_type PK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;&lt;b&gt;tire_compound PK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;used_tire&lt;/div&gt;&lt;div&gt;lap_count&lt;/div&gt;&lt;div&gt;avg_pace_seconds&lt;/div&gt;&lt;div&gt;std_pace_seconds&lt;/div&gt;&lt;div&gt;degredation_rate&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-71" parent="PcRn9LTad0zpBXWpxs-e-83" style="shape=table;startSize=30;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;tableRender=collapsed;" value="driver_race_feature_snapshot" vertex="1">
+                    <mxGeometry height="195" width="200" x="230" y="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-72" parent="PcRn9LTad0zpBXWpxs-e-71" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fixedHeader=1;" value="" vertex="1">
+                    <mxGeometry height="165" width="200" y="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-73" parent="PcRn9LTad0zpBXWpxs-e-72" style="shape=partialRectangle;html=1;whiteSpace=wrap;connectable=0;strokeColor=inherit;overflow=hidden;fillColor=none;pointerEvents=1;" value="&lt;b&gt;race_id PK FK&lt;/b&gt;&lt;div&gt;&lt;b&gt;driver_id PK FK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;constructor_id FK&lt;/div&gt;&lt;div&gt;&lt;b&gt;prediction_stage PK&lt;/b&gt;&lt;/div&gt;&lt;div&gt;source_dataset&lt;/div&gt;&lt;div&gt;feature_values&lt;/div&gt;&lt;div&gt;loaded_at&lt;/div&gt;" vertex="1">
+                    <mxGeometry height="165" width="200" as="geometry">
+                        <mxRectangle height="165" width="200" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-82" parent="PcRn9LTad0zpBXWpxs-e-83" style="whiteSpace=wrap;html=1;fillColor=none;dashed=1;dashPattern=1 4;" value="" vertex="1">
+                    <mxGeometry height="430" width="660" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-89" edge="1" parent="1" source="PcRn9LTad0zpBXWpxs-e-82" style="html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.507;entryY=0.997;entryDx=0;entryDy=0;entryPerimeter=0;rounded=1;curved=0;endArrow=ERone;endFill=0;startArrow=ERmany;startFill=0;" target="PcRn9LTad0zpBXWpxs-e-25">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-92" edge="1" parent="1" source="PcRn9LTad0zpBXWpxs-e-12" style="edgeStyle=none;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;endArrow=ERone;endFill=0;startArrow=ERmany;startFill=0;" target="PcRn9LTad0zpBXWpxs-e-9">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-93" edge="1" parent="1" source="PcRn9LTad0zpBXWpxs-e-25" style="edgeStyle=none;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;endArrow=ERone;endFill=0;startArrow=ERmany;startFill=0;" target="PcRn9LTad0zpBXWpxs-e-2">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-94" edge="1" parent="1" style="edgeStyle=elbowEdgeStyle;html=1;entryX=0.353;entryY=0.997;entryDx=0;entryDy=0;entryPerimeter=0;elbow=vertical;endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;" target="PcRn9LTad0zpBXWpxs-e-25">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="320" y="500"/>
+                        </Array>
+                        <mxPoint x="390" y="500" as="sourcePoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-98" edge="1" parent="1" source="PcRn9LTad0zpBXWpxs-e-18" style="edgeStyle=none;html=1;startArrow=ERone;startFill=0;endArrow=ERmany;endFill=0;">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="1120" y="903.3663366336632" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="PcRn9LTad0zpBXWpxs-e-100" edge="1" parent="1" source="PcRn9LTad0zpBXWpxs-e-21" style="edgeStyle=none;html=1;entryX=-0.001;entryY=0.777;entryDx=0;entryDy=0;entryPerimeter=0;endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;" target="PcRn9LTad0zpBXWpxs-e-82">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="465" y="905" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
