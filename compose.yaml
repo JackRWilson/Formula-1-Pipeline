@@ -1,10 +1,57 @@
 services:
-  airflow:
-    image: apache/airflow:latest
-    container_name: airflow
-    hostname: airflow
-    command: airflow 
+  db:
+    build: ./docker/db
+    hostname: db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE}
     ports:
-      - 8080:8080
+      - ${DB_PORT}:5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_DATABASE}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    hostname: azurite
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --location /data --skipApiVersionCheck
+    ports:
+      - 10000:10000
+    volumes:
+      - azurite_data:/data
+    healthcheck:
+      test: [ "CMD-SHELL", "nc -z 127.0.0.1 10000" ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  airflow:
+    build: ./docker/airflow
+    image: f1-airflow:latest
+    hostname: airflow
+    depends_on:
+      db:
+        condition: service_healthy
+      azurite:
+        condition: service_healthy
+    environment:
+      AIRFLOW_CONN_FORMULA_ONE_PG: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_DATABASE}
+      FORMULA_ONE_CACHE_DIR: /opt/airflow/cache
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+    command: standalone
+    ports:
+      - 8081:8080
     volumes:
       - ./dags:/opt/airflow/dags
+      - ./src/f1:/opt/airflow/src/f1:ro
+      - ./data:/opt/airflow/data:ro
+      - ./sql:/opt/airflow/sql:ro
+      - etl_cache:/opt/airflow/cache
+
+volumes:
+  pgdata:
+  etl_cache:
+  azurite_data:
