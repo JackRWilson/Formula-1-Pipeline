@@ -1,0 +1,13 @@
+ipykernel
+pandas
+matplotlib
+seaborn
+scikit-learn
+sqlalchemy
+psycopg[binary]
+python-dotenv
+requests
+selenium
+dynaconf
+azure-storage-blob
+pyarrow
