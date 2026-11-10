@@ -17,6 +17,8 @@ src/f1/pipeline/.last_run.json
 cache/
 fastf1/
 catboost_info/
+data/*
+!data/.gitkeep
 
 # Generated datasets and model outputs
 /data/raw_backup
