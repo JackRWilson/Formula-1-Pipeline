@@ -11,3 +11,4 @@ selenium
 dynaconf
 azure-storage-blob
 pyarrow
+fastf1
