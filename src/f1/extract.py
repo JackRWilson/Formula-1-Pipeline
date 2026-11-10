@@ -43,13 +43,14 @@ SPRINT_SESSION_TYPES = (
     "sprint-grid",
     "sprint-results",
 )
-MANIFEST_TABLE = "formula_one.f1site_scrape_manifest"
+F1SITE_MANIFEST_TABLE = "formula_one.f1site_scrape_manifest"
 RAW_CONTAINER = "f1-raw"
 FASTF1_START_YEAR = 2018
 FASTF1_SESSION_TABLE = "formula_one.fastf1_scrape_manifest"
 FASTF1_EVENT_TABLE = "formula_one.fastf1_event_schedule"
 FASTF1_CACHE_PATH = Path(__file__).resolve().parents[2] / "data" / "cache"
 WIKIPEDIA_CIRCUITS_URL = "https://en.wikipedia.org/wiki/List_of_Formula_One_circuits"
+MAX_ROUNDS_BLOB = "max_rounds.parquet"
 WIKIPEDIA_CIRCUITS_BLOB = "circuits_raw.parquet"
 PHOTON_LOCATIONS_BLOB = "locations_raw.parquet"
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ class ExtractF1Site:
         if sessions:
             self._conn.execute(
                 text(f"""
-                    insert into {MANIFEST_TABLE}
+                    insert into {F1SITE_MANIFEST_TABLE}
                         (url, year, round_number, session_type, status)
                     values
                         (:url, :year, :round_number, :session_type, 'pending')
@@ -149,7 +150,7 @@ class ExtractF1Site:
     def extract_pending_sessions(self):
         sessions = self._conn.execute(text(f"""
                 select url, year, round_number, session_type
-                from {MANIFEST_TABLE}
+                from {F1SITE_MANIFEST_TABLE}
                 where status in ('pending', 'failed')
                 order by year, round_number, session_type
                 """)).mappings().all()
@@ -168,7 +169,7 @@ class ExtractF1Site:
                     content_sha256 = upload_df_to_blob(data, RAW_CONTAINER, blob_name)
                     self._conn.execute(
                         text(f"""
-                            update {MANIFEST_TABLE}
+                            update {F1SITE_MANIFEST_TABLE}
                             set status = 'success',
                                 blob_name = :blob_name,
                                 content_sha256 = :content_sha256,
@@ -187,7 +188,7 @@ class ExtractF1Site:
                     unavailable += 1
                     self._conn.execute(
                         text(f"""
-                            update {MANIFEST_TABLE}
+                            update {F1SITE_MANIFEST_TABLE}
                             set status = 'unavailable',
                                 blob_name = null,
                                 content_sha256 = null,
@@ -202,7 +203,7 @@ class ExtractF1Site:
                     failures.append((session["url"], error))
                     self._conn.execute(
                         text(f"""
-                            update {MANIFEST_TABLE}
+                            update {F1SITE_MANIFEST_TABLE}
                             set status = 'failed',
                                 blob_name = null,
                                 content_sha256 = null,
@@ -487,12 +488,26 @@ class ExtractF1Site:
                 data = browser.find_elements(
                     By.XPATH, "//*[contains(text(), 'ROUND ')]"
                 )
-                rounds = [
-                    int(number)
-                    for item in data
-                    if (number := "".join(filter(str.isdigit, item.text)))
-                ]
-                max_rounds.append({"year": year, "max_rounds": max(rounds, default=0)})
+                valid_rounds = []
+
+                for item in data:
+                    number = "".join(filter(str.isdigit, item.text))
+                    if not number:
+                        continue
+                    number = int(number)
+
+                    try:
+                        card = item.find_element(
+                            By.XPATH, "./ancestor::div[contains(@class, 'flex-col')]"
+                        )
+                        if "CALLED OFF" in card.text.upper():
+                            continue
+                    except Exception:
+                        print(f"Error finding {year} round {number} card")
+
+                    valid_rounds.append(number)
+
+                max_rounds.append({"year": year, "max_rounds": len(valid_rounds)})
                 print_progress_bar(index, len(years))
         finally:
             browser.quit()
@@ -500,7 +515,7 @@ class ExtractF1Site:
         upload_df_to_blob(
             pd.DataFrame(max_rounds),
             container_name=RAW_CONTAINER,
-            blob_name="max_rounds.parquet",
+            blob_name=MAX_ROUNDS_BLOB,
         )
 
 

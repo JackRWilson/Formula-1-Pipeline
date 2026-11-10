@@ -1,40 +1,50 @@
-from sqlalchemy import Connection, text
+from sqlalchemy import text
 
 if __package__:
     from .extract import (
+        F1SITE_MANIFEST_TABLE,
         FASTF1_SESSION_TABLE,
-        MANIFEST_TABLE,
         RAW_CONTAINER,
         ExtractF1Site,
         ExtractFastF1,
         ExtractPhoton,
         ExtractWikipedia,
     )
+    from .transform import TransformSeason
     from .utils import download_df_from_blob
 else:
     from extract import (
+        F1SITE_MANIFEST_TABLE,
         FASTF1_SESSION_TABLE,
-        MANIFEST_TABLE,
         RAW_CONTAINER,
         ExtractF1Site,
         ExtractFastF1,
         ExtractPhoton,
         ExtractWikipedia,
     )
+    from transform import TransformSeason
     from utils import download_df_from_blob
+
+import pandas as pd
+
+pd.set_option("display.max_columns", None)
+pd.set_option("display.width", 1000)
 
 
 class ETLProcessor:
-    def __init__(self, conn: Connection):
+    def __init__(self, conn):
         self._conn = conn
 
     def process(self):
         print("ETL started")
-        ExtractF1Site(self._conn).extract()
-        circuits = ExtractWikipedia().extract()
-        ExtractPhoton().extract(circuits)
-        ExtractFastF1(self._conn).extract()
-        # self.print_blob_heads()
+        # ExtractF1Site(self._conn).extract()
+        # circuits = ExtractWikipedia().extract()
+        # ExtractPhoton().extract(circuits)
+        # ExtractFastF1(self._conn).extract()
+        self.print_blob_heads()
+
+        # season_df = TransformSeason(self._conn).transform()
+
         print("ETL complete")
 
     def print_blob_heads(self):
@@ -42,7 +52,7 @@ class ETLProcessor:
         sessions = self._conn.execute(text(f"""
                 select distinct on (session_type)
                     session_type, blob_name
-                from {MANIFEST_TABLE}
+                from {F1SITE_MANIFEST_TABLE}
                 where status = 'success' and blob_name is not null
                 order by session_type, year desc, round_number desc
                 """)).mappings().all()
@@ -52,6 +62,8 @@ class ETLProcessor:
             self._print_blob_head(session["session_type"], session["blob_name"])
 
         self._print_blob_head("max_rounds", "max_rounds.parquet")
+        self._print_blob_head("circuits", "circuits_raw.parquet")
+        self._print_blob_head("locations", "locations_raw.parquet")
         self._print_fastf1_blob_heads()
 
     def _print_fastf1_blob_heads(self):
@@ -74,7 +86,7 @@ class ETLProcessor:
                     )
 
     @staticmethod
-    def _print_blob_head(label: str, blob_name: str):
+    def _print_blob_head(label, blob_name):
         try:
             data = download_df_from_blob(RAW_CONTAINER, blob_name)
         except Exception as exc:

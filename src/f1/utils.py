@@ -211,7 +211,7 @@ def scrape_url_table(
     id_mask: dict = None,
     auto_url_id: bool = False,
     save_successful_urls: bool = False,
-    browser = None,
+    browser=None,
     show_progress: bool = True,
     raise_on_error: bool = False,
 ) -> pd.DataFrame:
@@ -318,9 +318,7 @@ def scrape_url_table(
                 page_level_data = {}
                 if page_lvl_cols:
                     has_matching_rows = any(
-                        min_col
-                        <= len(row.find_elements(By.TAG_NAME, "td"))
-                        <= max_col
+                        min_col <= len(row.find_elements(By.TAG_NAME, "td")) <= max_col
                         for current_table in tables
                         for row in current_table.find_elements(By.TAG_NAME, "tr")[1:]
                     )
@@ -734,7 +732,7 @@ def read_run_stage(stage, time_diff_hours=2.5):
 # ==============================================================================================
 # 7. Azurite Blob
 # ==============================================================================================
-def get_blob_container_client(container_name: str):
+def get_blob_container_client(container_name):
     """
     Return a container client, creating the container if it doesn't exist yet
 
@@ -750,7 +748,7 @@ def get_blob_container_client(container_name: str):
     return container_client
 
 
-def upload_df_to_blob(df: pd.DataFrame, container_name: str, blob_name: str):
+def upload_df_to_blob(df, container_name, blob_name):
     """
     Serialize a DataFrame to parquet in memory and upload it as a blob
 
@@ -761,13 +759,11 @@ def upload_df_to_blob(df: pd.DataFrame, container_name: str, blob_name: str):
     df.to_parquet(buffer, index=False)
     parquet_bytes = buffer.getvalue()
 
-    container_client.upload_blob(
-        name=blob_name, data=parquet_bytes, overwrite=True
-    )
+    container_client.upload_blob(name=blob_name, data=parquet_bytes, overwrite=True)
     return hashlib.sha256(parquet_bytes).hexdigest()
 
 
-def download_df_from_blob(container_name: str, blob_name: str) -> pd.DataFrame:
+def download_df_from_blob(container_name, blob_name):
     """
     Download a parquet blob and load it back into a DataFrame
 
