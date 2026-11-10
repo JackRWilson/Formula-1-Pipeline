@@ -5,23 +5,28 @@ from pathlib import Path
 
 import fastf1
 import pandas as pd
+from azure.core.exceptions import ResourceNotFoundError
 from fastf1.exceptions import DataNotLoadedError, RateLimitExceededError
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 from sqlalchemy import text
 
 if __package__:
-    from .project_functions import get_date
+    from .project_functions import clean_circuit_name, get_date
     from .utils import (
         create_browser,
+        download_df_from_blob,
+        get_location_data,
         print_progress_bar,
         scrape_url_table,
         upload_df_to_blob,
     )
 else:
-    from project_functions import get_date
+    from project_functions import clean_circuit_name, get_date
     from utils import (
         create_browser,
+        download_df_from_blob,
+        get_location_data,
         print_progress_bar,
         scrape_url_table,
         upload_df_to_blob,
@@ -44,6 +49,9 @@ FASTF1_START_YEAR = 2018
 FASTF1_SESSION_TABLE = "formula_one.fastf1_scrape_manifest"
 FASTF1_EVENT_TABLE = "formula_one.fastf1_event_schedule"
 FASTF1_CACHE_PATH = Path(__file__).resolve().parents[2] / "data" / "cache"
+WIKIPEDIA_CIRCUITS_URL = "https://en.wikipedia.org/wiki/List_of_Formula_One_circuits"
+WIKIPEDIA_CIRCUITS_BLOB = "circuits_raw.parquet"
+PHOTON_LOCATIONS_BLOB = "locations_raw.parquet"
 logger = logging.getLogger(__name__)
 
 
@@ -846,3 +854,127 @@ class ExtractFastF1:
             f"{session_info['round_number']:02d}-{event_slug}/"
             f"{session_slug}_{data_type}.parquet"
         )
+
+
+class ExtractWikipedia:
+    def extract(self):
+        print("\nScraping circuits from Wikipedia...")
+        circuits = scrape_url_table(
+            urls=[WIKIPEDIA_CIRCUITS_URL],
+            min_col=11,
+            max_col=11,
+            col_idx_map={
+                "name": 0,
+                "type": 2,
+                "direction": 3,
+                "location": 4,
+                "country": 5,
+                "length": 6,
+                "turns": 7,
+                "gp": 8,
+                "seasons": 9,
+                "gps_held": 10,
+            },
+            data_folder="",
+            raise_on_error=True,
+        )
+        if not isinstance(circuits, pd.DataFrame) or circuits.empty:
+            raise ValueError("Wikipedia returned no circuit rows")
+
+        upload_df_to_blob(circuits, RAW_CONTAINER, WIKIPEDIA_CIRCUITS_BLOB)
+        print(f"Scraped {len(circuits)} circuit rows from Wikipedia.\n")
+        return circuits
+
+
+class ExtractPhoton:
+    def extract(self, circuits):
+        required_columns = {"name", "location", "country"}
+        missing_columns = required_columns.difference(circuits.columns)
+        if missing_columns:
+            raise ValueError(
+                "Circuit data is missing columns required for location lookup: "
+                f"{sorted(missing_columns)}"
+            )
+
+        circuits = circuits.copy()
+        circuits["cleaned_place"] = circuits["name"].apply(clean_circuit_name)
+        circuits = circuits.drop_duplicates(subset=["cleaned_place"])
+        existing_locations = self._load_existing_locations()
+        known_places = set(
+            existing_locations.get("cleaned_name", pd.Series(dtype=str)).dropna()
+        )
+        pending = circuits[~circuits["cleaned_place"].isin(known_places)]
+
+        print(f"\nLooking up locations for {len(pending)} new circuits...")
+        new_locations = []
+        failures = {"no_coords": [], "no_elev": [], "error": []}
+        for index, (_, circuit) in enumerate(pending.iterrows(), start=1):
+            place = circuit["cleaned_place"]
+            result = get_location_data(
+                place,
+                circuit["location"],
+                circuit["country"],
+            )
+            if isinstance(result, dict):
+                new_locations.append(
+                    {
+                        "original_name": circuit["name"],
+                        "cleaned_name": place,
+                        "city": circuit["location"],
+                        "country": circuit["country"],
+                        "latitude": result.get("latitude"),
+                        "longitude": result.get("longitude"),
+                        "elevation": result.get("elevation"),
+                    }
+                )
+            elif result in failures:
+                failures[result].append(place)
+            else:
+                raise ValueError(
+                    f"Location lookup returned an unexpected result for {place!r}: "
+                    f"{result!r}"
+                )
+            print_progress_bar(index, len(pending))
+
+        locations = pd.concat(
+            [existing_locations, pd.DataFrame(new_locations)],
+            ignore_index=True,
+        )
+        if not locations.empty:
+            locations = locations.drop_duplicates(subset=["cleaned_name"], keep="last")
+        upload_df_to_blob(locations, RAW_CONTAINER, PHOTON_LOCATIONS_BLOB)
+        for failure, places in failures.items():
+            if places:
+                logger.warning(
+                    "%s location lookup(s) returned %s: %s",
+                    len(places),
+                    failure,
+                    ", ".join(places),
+                )
+        print(
+            f"Stored {len(new_locations)} new location rows "
+            f"({len(locations)} total).\n"
+        )
+        return locations
+
+    @staticmethod
+    def _load_existing_locations():
+        try:
+            locations = download_df_from_blob(RAW_CONTAINER, PHOTON_LOCATIONS_BLOB)
+        except ResourceNotFoundError:
+            return pd.DataFrame(
+                columns=[
+                    "original_name",
+                    "cleaned_name",
+                    "city",
+                    "country",
+                    "latitude",
+                    "longitude",
+                    "elevation",
+                ]
+            )
+        if "cleaned_name" not in locations.columns:
+            raise ValueError(
+                f"Existing {PHOTON_LOCATIONS_BLOB} is missing the cleaned_name column"
+            )
+        return locations

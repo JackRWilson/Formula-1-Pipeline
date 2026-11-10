@@ -7,6 +7,8 @@ if __package__:
         RAW_CONTAINER,
         ExtractF1Site,
         ExtractFastF1,
+        ExtractPhoton,
+        ExtractWikipedia,
     )
     from .utils import download_df_from_blob
 else:
@@ -16,6 +18,8 @@ else:
         RAW_CONTAINER,
         ExtractF1Site,
         ExtractFastF1,
+        ExtractPhoton,
+        ExtractWikipedia,
     )
     from utils import download_df_from_blob
 
@@ -27,8 +31,10 @@ class ETLProcessor:
     def process(self):
         print("ETL started")
         ExtractF1Site(self._conn).extract()
+        circuits = ExtractWikipedia().extract()
+        ExtractPhoton().extract(circuits)
         ExtractFastF1(self._conn).extract()
-        self.print_blob_heads()
+        # self.print_blob_heads()
         print("ETL complete")
 
     def print_blob_heads(self):
