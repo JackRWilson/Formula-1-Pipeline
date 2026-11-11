@@ -10,7 +10,7 @@ if __package__:
         ExtractPhoton,
         ExtractWikipedia,
     )
-    from .transform import TransformSeason
+    from .transform import TransformCircuit, TransformLocation, TransformSeason
     from .utils import download_df_from_blob
 else:
     from extract import (
@@ -22,7 +22,7 @@ else:
         ExtractPhoton,
         ExtractWikipedia,
     )
-    from transform import TransformSeason
+    from transform import TransformCircuit, TransformLocation, TransformSeason
     from utils import download_df_from_blob
 
 import pandas as pd
@@ -41,9 +41,15 @@ class ETLProcessor:
         # circuits = ExtractWikipedia().extract()
         # ExtractPhoton().extract(circuits)
         # ExtractFastF1(self._conn).extract()
-        self.print_blob_heads()
+        # self.print_blob_heads()
 
         # season_df = TransformSeason(self._conn).transform()
+        circuit_df = TransformCircuit().transform()
+        location_df = TransformLocation().transform(circuit_df)
+        print("\nTransformed circuits:")
+        print(circuit_df.head())
+        print("\nTransformed locations:")
+        print(location_df.head())
 
         print("ETL complete")
 
