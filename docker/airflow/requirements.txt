@@ -1,2 +1,4 @@
 pandas
 azure-storage-blob
+pyarrow
+fastf1
