@@ -1,149 +1,58 @@
-# Jack Wilson
-# 10/15/2025
-# This file defines general functions
-
-# ==============================================================================================
-# Import Modules
-# ==============================================================================================
-
-import io
 import hashlib
-import json
+import io
+import logging
 import os
-import pickle
-import shutil
+import re
 import sys
-import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+import unicodedata
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import requests
 from azure.core.exceptions import ResourceExistsError
-from azure.storage.blob import BlobServiceClient, ContainerClient
+from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 from selenium import webdriver
+from selenium.common.exceptions import (
+    StaleElementReferenceException,
+    WebDriverException,
+)
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from sklearn.linear_model import LinearRegression
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 SRC_ROOT = str(Path(PROJECT_ROOT) / "src")
 if SRC_ROOT not in sys.path:
     sys.path.insert(0, SRC_ROOT)
+MAX_ATTEMPTS = 3
 
 load_dotenv()
-
-
-# ==============================================================================================
-# 1. Load/Save ID Maps
-# ==============================================================================================
-
-
-def load_id_map(path: str, default: dict | list | None = None):
-    """
-    Load the pickle file ID maps if they exist, otherwise return an empty dictionary or list
-
-    """
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            return pickle.load(f)
-    else:
-        return {} if default is None else default
-
-
-def is_file_locked(filepath: str) -> bool:
-    """
-    Check if a file is currently locked by another process
-
-    """
-    try:
-        with open(filepath, "r+b") as f:
-            pass
-        return False
-    except (IOError, OSError):
-        return True
-
-
-def save_id_map(path: str, id_map, max_retries: int = 3):
-    """
-    Save the ID map to a pickle file with retry mechanism for permission errors
-
-    """
-    # Check if file is locked before attempting to save
-    if os.path.exists(path) and is_file_locked(path):
-        print(f"Warning: {path} appears to be locked by another process")
-
-    for attempt in range(max_retries):
-        try:
-            # Try to save directly first
-            with open(path, "wb") as f:
-                pickle.dump(id_map, f)
-            return  # Success, exit function
-
-        except PermissionError as e:
-            if attempt < max_retries - 1:
-                print(
-                    f"Permission denied on attempt {attempt + 1}, retrying in 1 second..."
-                )
-                time.sleep(1)
-            else:
-                # Final attempt: try using a temporary file and then moving it
-                try:
-                    temp_dir = os.path.dirname(path)
-                    temp_file = tempfile.NamedTemporaryFile(
-                        mode="wb", dir=temp_dir, delete=False, suffix=".pkl"
-                    )
-
-                    with temp_file as f:
-                        pickle.dump(id_map, f)
-
-                    # Move the temporary file to the target location
-                    shutil.move(temp_file.name, path)
-                    print(f"Successfully saved {path} using temporary file method")
-                    return
-
-                except Exception as final_e:
-                    print(
-                        f"Failed to save {path} after {max_retries} attempts: {final_e}"
-                    )
-                    raise final_e
-        except Exception as e:
-            print(f"Unexpected error saving {path}: {e}")
-            raise e
-
-
-# ==============================================================================================
-# 2. Column:Index Mapping
-# ==============================================================================================
 
 
 def init_col_map(col_map: dict):
     """
     Takes a {column_name: column_index} dictionary as an input and returns a new dictionary with
     indexes and empty lists
-
     """
     return {col: {"index": index, "values": []} for col, index in col_map.items()}
 
 
-# ==============================================================================================
-# 3. Scrape Data from URL
-# ==============================================================================================
-
-
 def create_browser():
     """
-    Creates a Chrome browser with logging suppressed
-
+    Creates a headless Chrome browser with logging suppressed
     """
     chrome_options = Options()
     chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--window-size=1920,1080")
     browser = webdriver.Chrome(options=chrome_options)
-    browser.maximize_window()
     return browser
 
 
@@ -155,7 +64,6 @@ def print_progress_bar(current, total, bar_length=40, start_time=None):
     Print a progress bar with ETA that updates on the same lines
 
     """
-    # Init start time
     global _progress_start_time
     if start_time is not None:
         _progress_start_time = start_time
@@ -166,7 +74,6 @@ def print_progress_bar(current, total, bar_length=40, start_time=None):
     filled = bar_length * current // total
     bar = "█" * filled + "-" * (bar_length - filled)
 
-    # Calculate ETA
     eta_str = "Calculating..."
     if _progress_start_time and current > 0:
         elapsed = time.time() - _progress_start_time
@@ -175,7 +82,6 @@ def print_progress_bar(current, total, bar_length=40, start_time=None):
             if rate > 0:
                 remaining = (total - current) / rate
 
-                # Format time nicely
                 if remaining < 60:
                     eta_str = f"{int(remaining)}s"
                 elif remaining < 3600:
@@ -194,10 +100,39 @@ def print_progress_bar(current, total, bar_length=40, start_time=None):
         flush=True,
     )
 
-    # Reset on completion
     if current >= total:
         print()
         _progress_start_time = None
+
+
+def _extract_matching_rows(browser, min_col: int, max_col: int) -> list:
+    """
+    Return the cell texts of every table row on the current page whose
+    <td> count falls within [min_col, max_col]. Each table's header row
+    (the first <tr>) is skipped.
+    """
+    matching_rows = []
+    for table in browser.find_elements(By.TAG_NAME, "table"):
+        for row in table.find_elements(By.TAG_NAME, "tr")[1:]:
+            try:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if not (min_col <= len(cells) <= max_col):
+                    continue
+
+                cell_texts = []
+                for cell in cells:
+                    try:
+                        cell_texts.append(cell.text.strip())
+                    except (StaleElementReferenceException, WebDriverException):
+                        cell_texts.append(None)
+            except (StaleElementReferenceException, WebDriverException):
+                logger.warning(
+                    "Skipping stale row while scraping table data.", exc_info=True
+                )
+                continue
+
+            matching_rows.append(cell_texts)
+    return matching_rows
 
 
 def scrape_url_table(
@@ -205,19 +140,14 @@ def scrape_url_table(
     min_col: int,
     max_col: int,
     col_idx_map: dict,
-    data_folder: str,
-    id_cols: list = None,
     page_lvl_cols: list = None,
-    id_mask: dict = None,
-    auto_url_id: bool = False,
-    save_successful_urls: bool = False,
     browser=None,
     show_progress: bool = True,
     raise_on_error: bool = False,
+    retry_delay: float = 1.0,
 ) -> pd.DataFrame:
     """
-    Scrapes a table from a website and returns a dataframe of scraped values
-
+    Scrapes table rows from one or more webpages and returns a DataFrame.
 
     Parameters
     ----------
@@ -228,56 +158,47 @@ def scrape_url_table(
     max_col : int
         Maximum number of columns to accept in a table row
     col_idx_map : dict
-        A dictionary mapping desired column names to column indices
-        Example: {'race_id': None, 'start_pos': 1, 'driver_name': 3...}
-    id_cols : list, optional
-        List of the names of ID columns in the col_idx_map
+        Maps desired column names to cell indices. An index of None produces
+        a column of None values (to be filled in later); a callable index is
+        a page-level column (see page_lvl_cols).
+        Example: {'race_id': None, 'start_pos': 1, 'driver_name': 3, ...}
     page_lvl_cols : list, optional
-        List of columns that need scraping on the page level, index will
-        contain path to scrape that data
-    data_folder : str
-        File path of data folder for saving any ID maps and successful URLs
-    id_mask : dict, optional
-        Dictionary mapping column names to value mapping dictionaries
-        Example: {'team_name': {'Red Bull Racing': 'Red Bull'}}
-    auto_url_id : bool, optional
-        Whether to automatically create URL IDs for each row
-        Default: False
-    save_successful_urls : bool, optional
-        Whether to save a list of successfully scraped URLs to the data folder
-        Default: False
+        Names of columns whose index is a callable taking the browser and
+        returning one value shared by every row on that page
+    browser : optional
+        An existing Selenium browser to reuse. If None, one is created
+        and closed by this function.
     show_progress : bool, optional
-        Whether to print per-URL progress output. Default: True.
+        Whether to print a progress bar. Default: True.
     raise_on_error : bool, optional
-        Re-raise scraping errors after the final attempt. Default: False.
-
+        Re-raise scraping errors after the final attempt instead of logging
+        and skipping the URL. Default: False.
+    retry_delay : float, optional
+        Seconds to wait between attempts on the same URL. Default: 1.0.
 
     Returns
     -------
     pd.DataFrame
-        A DataFrame containing the scraped table
-
+        A DataFrame containing the scraped rows
     """
-    # Validate min_col and max_col
+    # Validate inputs up front
     if min_col > max_col:
         raise ValueError(
             f"min_col ({min_col}) cannot be greater than max_col ({max_col})"
         )
 
-    # Initiate data mapping
+    page_lvl_cols = page_lvl_cols or []
     col_data = init_col_map(col_idx_map)
 
-    # Load URL ID map only if url_id is True
-    if auto_url_id:
-        if data_folder:
-            url_id_map = load_id_map(f"{data_folder}/url_id_map.pkl")
-        else:
-            url_id_map = load_id_map("url_id_map.pkl")
+    for col_name, col_info in col_data.items():
+        idx = col_info["index"]
+        if idx is None or isinstance(idx, int):
+            continue
+        if col_name in page_lvl_cols and callable(idx):
+            continue
+        raise ValueError(f"Unsupported index type for {col_name}: {type(idx)}")
 
-    # Initialize list for successful URLs if saving is enabled
-    successful_urls = [] if save_successful_urls else None
-
-    # Reuse a caller-owned browser when scraping one URL at a time.
+    # Create a browser if not supplied
     owns_browser = browser is None
     if owns_browser:
         browser = create_browser()
@@ -286,236 +207,98 @@ def scrape_url_table(
     if show_progress:
         print(f"\n   Scraping {total_urls} URLs...")
 
-    for i, url in enumerate(urls, start=1):
-        for attempt in range(3):
-            try:
-
-                # Get or create URL ID only if auto_url_id is True
-                if auto_url_id:
-                    if url in url_id_map:
-                        url_id_val = url_id_map[url]
-                    else:
-                        url_id_val = max(url_id_map.values()) + 1 if url_id_map else 1
-                        url_id_map[url] = url_id_val
-
-                        # Save the updated URL ID map
-                        if data_folder:
-                            save_id_map(f"{data_folder}/url_id_map.pkl", url_id_map)
-                        else:
-                            save_id_map("url_id_map.pkl", url_id_map)
-
+    try:
+        # Visit each URL
+        for i, url in enumerate(urls, start=1):
+            for attempt in range(1, MAX_ATTEMPTS + 1):
                 try:
+                    # Load page and collect every row that fits the column range
                     browser.get(url)
-                    time.sleep(0.5)
-                except Exception as e:
-                    if attempt == 2:
+                    rows = _extract_matching_rows(browser, min_col, max_col)
+
+                    # Fetch page-level values once per page
+                    page_level_data = {}
+                    if rows:
+                        page_level_data = {
+                            name: col_data[name]["index"](browser)
+                            for name in page_lvl_cols
+                        }
+
+                    # Map cells to output columns
+                    buffer = {name: [] for name in col_data}
+                    for cell_texts in rows:
+                        for name, info in col_data.items():
+                            idx = info["index"]
+                            if idx is None:
+                                value = None
+                            elif isinstance(idx, int):
+                                value = (
+                                    cell_texts[idx] if idx < len(cell_texts) else None
+                                )
+                            else:
+                                value = page_level_data[name]
+                            buffer[name].append(value)
+
+                    # Commit only after the whole page succeeded
+                    for name, values in buffer.items():
+                        col_data[name]["values"].extend(values)
+                    break
+
+                except Exception:
+                    if attempt == MAX_ATTEMPTS:
                         if raise_on_error:
                             raise
-                        print(f"ERROR with {url}: {e}")
-                    continue
+                        logger.warning("ERROR with %s", url, exc_info=True)
+                    else:
+                        time.sleep(retry_delay)
 
-                tables = browser.find_elements(By.TAG_NAME, "table")
-                page_level_data = {}
-                if page_lvl_cols:
-                    has_matching_rows = any(
-                        min_col <= len(row.find_elements(By.TAG_NAME, "td")) <= max_col
-                        for current_table in tables
-                        for row in current_table.find_elements(By.TAG_NAME, "tr")[1:]
-                    )
-                else:
-                    has_matching_rows = False
-                if page_lvl_cols and has_matching_rows:
-                    for col_name in page_lvl_cols:
-                        if col_name in col_data and callable(
-                            col_data[col_name]["index"]
-                        ):
-                            page_level_data[col_name] = col_data[col_name]["index"](
-                                browser
-                            )
-
-                for tr in tables:
-                    rows = tr.find_elements(By.TAG_NAME, "tr")[1:]
-                    for row in rows:
-                        # Re-find cells for each row to avoid stale element references
-                        try:
-                            cells = row.find_elements(By.TAG_NAME, "td")
-                        except Exception as e:
-                            # If row becomes stale, skip it
-                            continue
-
-                        # Validate table has the right number of columns within the specified range
-                        num_cells = len(cells)
-                        if min_col <= num_cells <= max_col:
-
-                            # Extract all cell texts immediately to avoid stale references
-                            cell_texts = []
-                            for cell in cells:
-                                try:
-                                    cell_texts.append(cell.text.strip())
-                                except Exception as e:
-                                    # If cell becomes stale, append None
-                                    cell_texts.append(None)
-
-                            # For each column in the column map append the corresponding data
-                            for col_name, col_info in col_data.items():
-
-                                # Skip indexes with None
-                                if col_info["index"] == None:
-                                    continue
-
-                                # Create IDs and ID maps only if id_cols is provided and column is in id_cols
-                                if id_cols and col_name in id_cols:
-
-                                    # Load or create ID map
-                                    if data_folder:
-                                        id_map = load_id_map(
-                                            f"{data_folder}/{col_name}_map.pkl"
-                                        )
-                                    else:
-                                        id_map = load_id_map(f"{col_name}_map.pkl")
-
-                                    # Get the value from the extracted cell texts using the index from col_map
-                                    if isinstance(col_info["index"], int):
-                                        if col_info["index"] < num_cells:
-                                            scraped_value = cell_texts[
-                                                col_info["index"]
-                                            ]
-                                        else:
-                                            scraped_value = None
-                                    elif page_lvl_cols and col_name in page_lvl_cols:
-                                        scraped_value = page_level_data[col_name]
-                                    else:
-                                        raise ValueError(
-                                            f"Unsupported index type for {col_name}: {type(col_info['index'])}"
-                                        )
-
-                                    # Apply ID mask if provided
-                                    if (
-                                        id_mask
-                                        and col_name in id_mask
-                                        and scraped_value is not None
-                                    ):
-                                        scraped_value = id_mask[col_name].get(
-                                            scraped_value, scraped_value
-                                        )
-
-                                    # Search through ID map keys to find a match
-                                    matched_key = None
-                                    if scraped_value is not None:
-                                        for existing_key in id_map.keys():
-                                            if scraped_value in existing_key:
-                                                matched_key = existing_key
-                                                break
-
-                                    # Use matched key if found, otherwise use scraped value
-                                    lookup_key = (
-                                        matched_key
-                                        if matched_key is not None
-                                        else scraped_value
-                                    )
-
-                                    # Append existing ID or create new key-value pair
-                                    if scraped_value is None:
-                                        col_info["values"].append(None)
-                                    elif lookup_key in id_map:
-                                        col_info["values"].append(id_map[lookup_key])
-                                    else:
-                                        new_id = (
-                                            max(id_map.values()) + 1 if id_map else 1
-                                        )
-                                        id_map[lookup_key] = new_id
-                                        col_info["values"].append(new_id)
-
-                                        # Save the updated ID map
-                                        if data_folder:
-                                            save_id_map(
-                                                f"{data_folder}/{col_name}_map.pkl",
-                                                id_map,
-                                            )
-                                        else:
-                                            save_id_map(f"{col_name}_map.pkl", id_map)
-
-                                # Handle non-ID columns
-                                else:
-                                    if isinstance(col_info["index"], int):
-                                        if col_info["index"] < num_cells:
-                                            scraped_value = cell_texts[
-                                                col_info["index"]
-                                            ]
-                                        else:
-                                            scraped_value = None  # Index out of bounds
-                                    elif page_lvl_cols and col_name in page_lvl_cols:
-                                        scraped_value = page_level_data[col_name]
-                                    else:
-                                        raise ValueError(
-                                            f"Unsupported index type for {col_name}: {type(col_info['index'])}"
-                                        )
-                                    col_info["values"].append(scraped_value)
-
-                            # Append the same URL ID for every row from this URL only if auto_url_id is True
-                            if auto_url_id:
-                                if "url_id" not in col_data:
-                                    col_data["url_id"] = {"index": None, "values": []}
-                                col_data["url_id"]["values"].append(url_id_val)
-
-                # Add URL to successful URLs list if data was found and saving is enabled
-                if save_successful_urls:
-                    successful_urls.append(url)
-
-                break
-
-            except Exception as e:
-                if attempt == 2:
-                    if raise_on_error:
-                        raise
-                    print(f"ERROR with {url}: {e}")
-
-        # Update progress bar
-        if show_progress:
-            print_progress_bar(i, total_urls)
+            if show_progress:
+                print_progress_bar(i, total_urls)
+    finally:
+        if owns_browser:
+            browser.quit()
 
     if show_progress:
         print()
-    if owns_browser:
-        browser.quit()
-    if show_progress:
-        print()
 
-    # Save successful URLs to file if enabled
-    if save_successful_urls and successful_urls:
-        try:
-            if data_folder:
-                successful_urls_path = f"{data_folder}/successful_urls.pkl"
-            else:
-                successful_urls_path = "successful_urls.pkl"
-            save_id_map(successful_urls_path, successful_urls)
-        except Exception as e:
-            print(f"Failed to save successful URLs: {e}")
+    # Assemble DataFrame
+    return pd.DataFrame({name: info["values"] for name, info in col_data.items()})
 
-    # Convert column data to DataFrame
-    df_data = {}
-    for col_name, col_info in col_data.items():
-        df_data[col_name] = col_info["values"]
 
+def get_date(browser):
+    """
+    Extract date with wait and retry
+    """
     try:
-        df = pd.DataFrame(df_data)
+        # Wait for the element to be present
+        element = WebDriverWait(browser, 10).until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    "//div[@class='Container-module_container__0e4ac']//p[contains(@class, 'display-s-bold')]",
+                )
+            )
+        )
+
+        # Wait a bit for any re-rendering to finish
+        time.sleep(0.5)
+
+        # Get fresh reference to avoid stale element
+        element = browser.find_element(
+            By.XPATH,
+            "//div[@class='Container-module_container__0e4ac']//p[contains(@class, 'display-s-bold')]",
+        )
+        return element.text
     except Exception as e:
-        print(f"ARRAY LENGTH ERROR: {e}")
-        return f"ERROR: {e}"
-
-    return df
-
-
-# ==============================================================================================
-# 4. Aggregate Column Values
-# ==============================================================================================
+        print(f"Failed to extract date: {e}")
+        return None
 
 
 def aggregate_columns(
     df, columns: list = None, boolean_columns: list = None, string_columns: list = None
 ):
     """
-    Universal aggregation function that returns mean, min, max, and std values for numeric columns,
+    Aggregation function that returns mean, min, max, and std values for numeric columns,
     boolean aggregation for True/False columns, and the first value for string columns.
 
     Parameters
@@ -533,7 +316,6 @@ def aggregate_columns(
     -------
     pd.DataFrame
         Aggregated statistics for the specified columns with a single row
-
     """
     agg = {}
 
@@ -565,12 +347,7 @@ def aggregate_columns(
     return pd.DataFrame([agg])
 
 
-# ==============================================================================================
-# 5. Get Location Data
-# ==============================================================================================
-
-
-def get_location_data(place, city, country):
+def get_location_data(place: str, city: str, country: str) -> dict:
     """
     Get latitude, longitude, and elevation for a location.
 
@@ -641,101 +418,9 @@ def get_location_data(place, city, country):
         return "error"
 
 
-# ==============================================================================================
-# 6. Update / Read Timestamp File
-# ==============================================================================================
-
-
-def update_run_stage(stage):
-    """
-    Create or update the .last_run.json file with current timestamp for the given stage
-    Stage must be one of: "scrape", "clean", or "model"
-    If the file does not exist, initializes all stages as keys and their values as empty strings
-
-    """
-    # Specify constants and check stage
-    LAST_RUN_PATH = os.path.join(
-        PROJECT_ROOT, "src", "f1", "pipeline", ".last_run.json"
-    )
-    valid_stages = ["scrape", "clean", "model"]
-    if stage not in valid_stages:
-        raise ValueError(f"Stage must be one of {valid_stages}. Got '{stage}'.")
-
-    timestamp = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
-
-    # Check if file exists and load data
-    if not os.path.isfile(LAST_RUN_PATH):
-        data = {stg: "" for stg in valid_stages}
-    else:
-        with open(LAST_RUN_PATH, "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-
-                # Ensure all stage keys present
-                for stg in valid_stages:
-                    if stg not in data:
-                        data[stg] = ""
-            except json.JSONDecodeError:
-                data = {stg: "" for stg in valid_stages}
-
-    # Update stage timestamp
-    data[stage] = timestamp
-
-    # Save back to file
-    with open(LAST_RUN_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
-
-
-def read_run_stage(stage, time_diff_hours=2.5):
-    """
-    Check if stage has been run within the last 'time_diff_hours'
-    Returns True if the stage should be run
-        - The file doesnt exist
-        - More than 'time_diff_hours' has passed since last run
-    Returns False if not enough time has passed
-
-    """
-    # Specify constants and check stage
-    LAST_RUN_PATH = os.path.join(
-        PROJECT_ROOT, "src", "f1", "pipeline", ".last_run.json"
-    )
-    valid_stages = {"scrape", "clean", "model"}
-    if stage not in valid_stages:
-        raise ValueError(f"Stage must be one of {valid_stages}. Got '{stage}'.")
-
-    # Check if file exists
-    if not os.path.isfile(LAST_RUN_PATH):
-        return True
-
-    # Read JSON file and get timestamp for the stage
-    try:
-        with open(LAST_RUN_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        return True
-
-    last_ts_str = data.get(stage, None)
-    if not last_ts_str:
-        return True
-
-    # Parse saved timestamp
-    try:
-        last_ts = datetime.fromisoformat(last_ts_str)
-        now = datetime.now(timezone.utc)
-    except Exception:
-        return True
-
-    # Compare to now
-    return now - last_ts >= timedelta(hours=time_diff_hours)
-
-
-# ==============================================================================================
-# 7. Azurite Blob
-# ==============================================================================================
 def get_blob_container_client(container_name):
     """
-    Return a container client, creating the container if it doesn't exist yet
-
+    Return an Azurite container client, creating the container if it doesn't exist yet
     """
     blob_service_client = BlobServiceClient.from_connection_string(
         os.environ["AZURE_STORAGE_CONNECTION_STRING"]
@@ -751,7 +436,6 @@ def get_blob_container_client(container_name):
 def upload_df_to_blob(df, container_name, blob_name):
     """
     Serialize a DataFrame to parquet in memory and upload it as a blob
-
     """
     container_client = get_blob_container_client(container_name)
 
@@ -766,9 +450,789 @@ def upload_df_to_blob(df, container_name, blob_name):
 def download_df_from_blob(container_name, blob_name):
     """
     Download a parquet blob and load it back into a DataFrame
-
     """
     container_client = get_blob_container_client(container_name)
 
     blob_bytes = container_client.download_blob(blob_name).readall()
     return pd.read_parquet(io.BytesIO(blob_bytes))
+
+
+def get_degradation_rate(lap_times, lap_numbers):
+    """
+    Calculates the degradation rate of tyres based on a linear regression
+    """
+    valid_mask = ~np.isnan(lap_times)
+    clean_lap_times = lap_times[valid_mask]
+    clean_lap_numbers = lap_numbers[valid_mask]
+
+    if len(clean_lap_times) > 3:
+        X = np.array(clean_lap_numbers).reshape(-1, 1)
+        y = np.array(clean_lap_times)
+        model = LinearRegression().fit(X, y)
+        return model.coef_[0]
+    return np.nan
+
+
+def compute_compound_stats(comp_data, compound) -> dict:
+    """
+    Calculate tyre compound statistics for a specific compount
+    """
+    if comp_data.empty:
+        return {
+            f"avg_pace_{compound.lower()}": np.nan,
+            f"std_pace_{compound.lower()}": np.nan,
+            f"laps_on_{compound.lower()}": 0,
+            f"deg_rate_{compound.lower()}": np.nan,
+        }
+    lap_times = comp_data["LapTime"].values
+    lap_numbers = comp_data["LapNumber"].values
+    return {
+        f"avg_pace_{compound.lower()}": np.nanmean(lap_times),
+        f"std_pace_{compound.lower()}": np.nanstd(lap_times),
+        f"laps_on_{compound.lower()}": len(lap_times),
+        f"deg_rate_{compound.lower()}": get_degradation_rate(lap_times, lap_numbers),
+    }
+
+
+def process_lap_file(filepath, code_to_name_map, driver_id_map) -> pd.DataFrame:
+    """
+    Process a single laps file and return aggregated driver stats
+    """
+    fh = pd.read_parquet(filepath)
+
+    # Filter rows
+    filtered_data = fh[
+        (fh["TrackStatus"] == "1")  # No flags
+        & fh["PitOutTime"].isna()  # Not an OUT lap
+        & fh["PitInTime"].isna()  # Not an IN lap
+        & fh["IsAccurate"]
+        == True  # Full lap completed and is accurate
+        & (fh["LapTime"] < fh["LapTime"].quantile(0.95))  # Get rid of outliers
+    ].copy()
+
+    if len(filtered_data) == 0:
+        print("      No data after filtering")
+        return pd.DataFrame()
+
+    # Convert lap times
+    filtered_data["LapTime"] = filtered_data["LapTime"].dt.total_seconds()
+    filtered_data = filtered_data[filtered_data["LapTime"].notna()].copy()
+
+    # Map driver codes and add metadata
+    filtered_data["driver_id"] = (
+        filtered_data["Driver"].map(code_to_name_map).map(driver_id_map)
+    )
+    if "race_id" in fh.columns:
+        filtered_data["race_id"] = fh.loc[filtered_data.index, "race_id"]
+    if "session" in fh.columns:
+        filtered_data["session"] = fh.loc[filtered_data.index, "session"]
+
+    # Extract year from filename for compound mapping
+    year = int(filepath.stem.split("_")[0])
+
+    # Apply compound mapping for 2018
+    if year == 2018:
+        compound_mapping = {
+            "SUPERSOFT": "SOFT",
+            "HYPERSOFT": "SOFT",
+            "ULTRASOFT": "SOFT",
+            "SOFT": "MEDIUM",
+            "MEDIUM": "HARD",
+            "HARD": "HARD",
+        }
+        filtered_data["Compound"] = (
+            filtered_data["Compound"]
+            .map(compound_mapping)
+            .fillna(filtered_data["Compound"])
+        )
+
+    # Aggregate by driver
+    compounds = ["SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET"]
+    summaries = []
+
+    for driver, group in filtered_data.groupby("Driver"):
+        summary = {"driver_name": driver}
+
+        # Add metadata from first row
+        for col in ["driver_id", "race_id", "session"]:
+            if col in group.columns:
+                summary[col] = group[col].iloc[0]
+
+        # Add compound stats
+        for comp in compounds:
+            comp_data = group[group["Compound"] == comp]
+            summary.update(compute_compound_stats(comp_data, comp))
+
+        summaries.append(summary)
+
+    return pd.DataFrame(summaries)
+
+
+def process_flag_file(filepath, basic_count_flags, string_columns) -> pd.DataFrame:
+    """
+    Process a single flag file and return aggregated stats
+    """
+
+    fh = pd.read_parquet(filepath)
+
+    # Initialize aggregation dictionary
+    agg = {}
+
+    # Count each flag type
+    if "Flag" in fh.columns:
+        for flag in basic_count_flags:
+            agg[f'flag_{flag.lower().replace(" ", "_")}_count'] = (
+                fh["Flag"] == flag
+            ).sum()
+
+    # Count safety car deployments
+    if all(col in fh.columns for col in ["Category", "Status", "Message"]):
+        sc_deployments = fh[
+            (fh["Category"] == "SafetyCar")
+            & (fh["Status"] == "DEPLOYED")
+            & (~fh["Message"].str.contains("VIRTUAL", case=False, na=False))
+        ]
+        agg["safety_car_deployments"] = len(sc_deployments)
+
+    # Count virtual safety Car deployments
+    if all(col in fh.columns for col in ["Category", "Status", "Message"]):
+        vsc_deployments = fh[
+            (fh["Category"] == "SafetyCar")
+            & (fh["Status"] == "DEPLOYED")
+            & (fh["Message"].str.contains("VIRTUAL", case=False, na=False))
+        ]
+        agg["virtual_safety_car_deployments"] = len(vsc_deployments)
+
+    # Calculate safety car lap percentages
+    if "Lap" in fh.columns:
+        total_laps = fh["Lap"].max()
+        if total_laps > 0:
+            # Find all SC laps
+            sc_deployed_laps = fh[
+                (fh["Category"] == "SafetyCar")
+                & (fh["Status"] == "DEPLOYED")
+                & (~fh["Message"].str.contains("VIRTUAL", case=False, na=False))
+            ]["Lap"].values
+            sc_in_laps = fh[
+                (fh["Category"] == "SafetyCar")
+                & (fh["Status"] == "IN THIS LAP")
+                & (~fh["Message"].str.contains("VIRTUAL", case=False, na=False))
+            ]["Lap"].values
+
+            # Find all VSC laps
+            vsc_deployed_laps = fh[
+                (fh["Category"] == "SafetyCar")
+                & (fh["Status"] == "DEPLOYED")
+                & (fh["Message"].str.contains("VIRTUAL", case=False, na=False))
+            ]["Lap"].values
+            vsc_ending_laps = fh[
+                (fh["Category"] == "SafetyCar")
+                & (fh["Status"] == "ENDING")
+                & (fh["Message"].str.contains("VIRTUAL", case=False, na=False))
+            ]["Lap"].values
+
+            # Sum up all the safety car periods
+            total_sc_laps = sum(
+                sc_in_laps[i] - sc_deployed_laps[i] + 1
+                for i in range(min(len(sc_deployed_laps), len(sc_in_laps)))
+            )
+            total_vsc_laps = sum(
+                vsc_ending_laps[i] - vsc_deployed_laps[i] + 1
+                for i in range(min(len(vsc_deployed_laps), len(vsc_ending_laps)))
+            )
+            agg["total_sc_laps"] = total_sc_laps
+            agg["total_vsc_laps"] = total_vsc_laps
+
+    # Add string columns
+    for col in string_columns:
+        if col in fh.columns and not fh[col].empty:
+            agg[col] = fh[col].iloc[0]
+
+    return pd.DataFrame([agg])
+
+
+def convert_position(row, prev_position=None):
+    """
+    Converts position to numeric, or changes classification to a number
+
+    """
+    try:
+        return int(row["position"])
+    except (ValueError, TypeError):
+        if prev_position is not None:
+            return prev_position + 1
+        else:
+            return 1
+
+
+def clean_qualifying_times(df):
+    """
+    Cleans qualifying session times and adds no_lap_time flags for Q1, Q2, Q3.
+    Uses qualifying position to determine advancement and flags drivers with DNF/DNS/NA times.
+
+    Assumes df contains: ['race_id', 'driver_id', 'q1_time', 'q2_time', 'q3_time', 'qual_position']
+    """
+
+    df = df.copy()
+
+    # Define cutoffs
+    Q2_CUTOFF = 15  # Top 15 advance to Q2
+    Q3_CUTOFF = 10  # Top 10 advance to Q3
+
+    # Ensure qualifying position is numeric and sort
+    df["qual_position"] = pd.to_numeric(df["qual_position"], errors="coerce")
+    df = df.sort_values(["race_id", "qual_position"])
+
+    # Determine who advances to Q2 and Q3
+    df["advanced_to_q2"] = df["qual_position"] <= Q2_CUTOFF
+    df["advanced_to_q3"] = df["qual_position"] <= Q3_CUTOFF
+
+    # Convert time strings to seconds
+    for session in ["q1", "q2", "q3"]:
+        time_col = f"{session}_time"
+
+        # Convert to numeric
+        df[time_col] = df[time_col].apply(
+            lambda x: (
+                None
+                if pd.isna(x)
+                or (isinstance(x, str) and x.upper() in ["DNF", "DNS", ""])
+                else (
+                    float(x.split(":")[0]) * 60 + float(x.split(":")[1])
+                    if isinstance(x, str) and ":" in x
+                    else float(x) if isinstance(x, str) else x
+                )
+            )
+        )
+
+    # Add no_lap_time flags for each session
+    df["q1_no_lap_time_flag"] = df["q1_time"].isna().astype(int)
+    df["q2_no_lap_time_flag"] = (
+        (df["advanced_to_q2"]) & (df["q2_time"].isna())
+    ).astype(int)
+    df["q3_no_lap_time_flag"] = (
+        (df["advanced_to_q3"]) & (df["q3_time"].isna())
+    ).astype(int)
+
+    # Get max times per session for imputation
+    df["max_q1_time"] = df.groupby("race_id")["q1_time"].transform("max")
+    df["max_q2_time"] = df.groupby("race_id")["q2_time"].transform("max")
+    df["max_q3_time"] = df.groupby("race_id")["q3_time"].transform("max")
+
+    # Q1 imputation
+    df.loc[df["q1_time"].isna(), "q1_time"] = df["max_q1_time"] + 5
+
+    # Q2 imputation
+    q2_missing = df["q2_time"].isna()
+    df.loc[q2_missing & df["advanced_to_q2"], "q2_time"] = (
+        df["max_q2_time"] + 5
+    )  # +5s for drivers who advanced but didnt set a time
+    df.loc[q2_missing & ~df["advanced_to_q2"], "q2_time"] = (
+        df["max_q2_time"] + 10
+    )  # +10s for drivers who didnt advance
+
+    # Q3 imputation
+    q3_missing = df["q3_time"].isna()
+    df.loc[q3_missing & df["advanced_to_q3"], "q3_time"] = df["max_q3_time"] + 5
+    df.loc[q3_missing & ~df["advanced_to_q3"], "q3_time"] = df["max_q3_time"] + 10
+
+    # Drop helper columns
+    df.drop(
+        columns=[
+            "advanced_to_q2",
+            "advanced_to_q3",
+            "max_q1_time",
+            "max_q2_time",
+            "max_q3_time",
+        ],
+        inplace=True,
+    )
+
+    return df
+
+
+def clean_pit_time(time_str):
+    """
+    Convert pit stop time from min:sec.millisec format to total seconds
+    """
+    if ":" in time_str:
+        minutes, seconds = time_str.split(":")
+        return float(minutes) * 60 + float(seconds)
+    else:
+        return float(time_str)
+
+
+def impute_pit_times(row, pit_stops_bound):
+    current_race_id = row["race_id"]
+    driver_id = row["driver_id"]
+    team_id = row["team_id"]
+
+    # Filter pit_stops_bound to only include stops before current race
+    past_stops = pit_stops_bound[pit_stops_bound["race_id"] < current_race_id]
+
+    # No historical data, return 0
+    if past_stops.empty:
+        return 0
+
+    # Try driver average (last 5 pits)
+    driver_stops = past_stops[past_stops["driver_id"] == driver_id][
+        "pits_time_seconds"
+    ].tail(5)
+    if len(driver_stops) > 0:
+        return driver_stops.mean()
+
+    # Try driver average (all pits)
+    driver_stops = past_stops[past_stops["driver_id"] == driver_id]["pits_time_seconds"]
+    if len(driver_stops) > 0:
+        return driver_stops.mean()
+
+    # Try team average (last 5 pits)
+    team_stops = past_stops[past_stops["team_id"] == team_id]["pits_time_seconds"].tail(
+        5
+    )
+    if len(team_stops) > 0:
+        return team_stops.mean()
+
+    # Try team average (last 10 pits)
+    team_stops = past_stops[past_stops["team_id"] == team_id]["pits_time_seconds"].tail(
+        10
+    )
+    if len(team_stops) > 0:
+        return team_stops.mean()
+
+    # Global team average (all pits)
+    team_stops = past_stops[past_stops["team_id"] == team_id]["pits_time_seconds"]
+    if len(team_stops) > 0:
+        return team_stops.mean()
+
+    # Fallback to 0
+    return 0
+
+
+def clean_circuit_name(name):
+    """
+    Clean circuit name to remove special characters while keeping letters, spaces, hyphens, and international letters with accents
+
+    """
+    if not isinstance(name, str):
+        return name
+
+    # Normalize to NFKC to standardize Unicode characters
+    name = unicodedata.normalize("NFKC", name)
+
+    # Remove daggers and asterisks
+    name = name.replace("†", "").replace("*", "")
+
+    # Keep only letters (including international), spaces, and hyphens
+    cleaned = "".join(char for char in name if char.isalpha() or char in (" ", "-"))
+
+    # Replace multiple spaces or hyphens with a single space
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = cleaned.strip()
+
+    return cleaned
+
+
+constructor_mapping = {
+    "team_id": {
+        # Red Bull
+        "Red Bull Racing Renault": "Red Bull",
+        "Red Bull Renault": "Red Bull",
+        "RBR Renault": "Red Bull",
+        "RBR Cosworth": "Red Bull",
+        "RBR Ferrari": "Red Bull",
+        "Red Bull Racing TAG Heuer": "Red Bull",
+        "Red Bull Racing Honda": "Red Bull",
+        "Red Bull Racing RBPT": "Red Bull",
+        "Red Bull Racing Honda RBPT": "Red Bull",
+        "Red Bull Racing": "Red Bull",
+        # AlphaTauri/Toro Rosso
+        "Toro Rosso": "Toro Rosso",
+        "STR Ferrari": "Toro Rosso",
+        "STR Renault": "Toro Rosso",
+        "STR Cosworth": "Toro Rosso",
+        "Toro Rosso Ferrari": "Toro Rosso",
+        "Scuderia Toro Rosso Honda": "Toro Rosso",
+        "AlphaTauri Honda": "AlphaTauri",
+        "AlphaTauri RBPT": "AlphaTauri",
+        "AlphaTauri Honda RBPT": "AlphaTauri",
+        # Racing Bulls
+        "RB Honda RBPT": "Racing Bulls",
+        # Ferrari
+        "Ferrari": "Ferrari",
+        "Ferrari Jaguar": "Ferrari",
+        "Thin Wall Ferrari": "Ferrari",
+        # Mercedes
+        "Mercedes": "Mercedes",
+        "Mercedes-Benz": "Mercedes",
+        # Aston Martin
+        "Aston Martin Mercedes": "Aston Martin",
+        "Aston Martin Aramco Mercedes": "Aston Martin",
+        "Aston Butterworth": "Aston Martin",
+        "Aston Martin": "Aston Martin",
+        # McLaren
+        "McLaren Ford": "McLaren",
+        "McLaren TAG": "McLaren",
+        "McLaren Honda": "McLaren",
+        "McLaren Peugeot": "McLaren",
+        "McLaren Renault": "McLaren",
+        "McLaren BRM": "McLaren",
+        "McLaren Mercedes": "McLaren",
+        "McLaren Serenissima": "McLaren",
+        "Mclaren BRM": "McLaren",
+        "McLaren Alfa Romeo": "McLaren",
+        # Williams
+        "Williams Ford": "Williams",
+        "Williams Renault": "Williams",
+        "Williams Honda": "Williams",
+        "Williams Judd": "Williams",
+        "Williams BMW": "Williams",
+        "Williams Toyota": "Williams",
+        "Williams Cosworth": "Williams",
+        "Williams Mecachrome": "Williams",
+        "Williams Supertec": "Williams",
+        "Williams Mercedes": "Williams",
+        "Frank Williams Racing Cars/Williams": "Williams",
+        # Renault
+        "Renault": "Renault",
+        # Alpine
+        "Alpine Renault": "Alpine",
+        # Lotus
+        "Lotus Renault": "Lotus",
+        "Lotus Ford": "Lotus",
+        "Lotus Climax": "Lotus",
+        "Lotus BRM": "Lotus",
+        "Lotus Honda": "Lotus",
+        "Lotus Judd": "Lotus",
+        "Lotus Lamborghini": "Lotus",
+        "Lotus Mugen Honda": "Lotus",
+        "Lotus Mercedes": "Lotus",
+        "Lotus Cosworth": "Lotus",
+        "Lotus Maserati": "Lotus",
+        "Lotus Pratt & Whitney": "Lotus",
+        # Force India
+        "Force India Ferrari": "Force India",
+        "Force India Mercedes": "Force India",
+        # Racing Point
+        "Racing Point BWT Mercedes": "Racing Point",
+        # Sauber
+        "Sauber": "Sauber",
+        "Sauber Ferrari": "Sauber",
+        "Sauber Petronas": "Sauber",
+        "Sauber BMW": "Sauber",
+        "Sauber Mercedes": "Sauber",
+        "Sauber Ford": "Sauber",
+        "Kick Sauber Ferrari": "Sauber",
+        # Alfa Romeo
+        "Alfa Romeo Racing Ferrari": "Alfa Romeo",
+        "Alfa Romeo Ferrari": "Alfa Romeo",
+        "Alfa Romeo": "Alfa Romeo",
+        # Haas
+        "Haas Ferrari": "Haas",
+        "Haas F1 Team": "Haas",
+        # Jordan
+        "Jordan Ford": "Jordan",
+        "Jordan Peugeot": "Jordan",
+        "Jordan Hart": "Jordan",
+        "Jordan Honda": "Jordan",
+        "Jordan Yamaha": "Jordan",
+        "Jordan Toyota": "Jordan",
+        "Jordan Mugen Honda": "Jordan",
+        # BAR
+        "BAR Honda": "BAR",
+        "BAR Supertec": "BAR",
+        # Honda
+        "Honda": "Honda",
+        # Benetton
+        "Benetton Ford": "Benetton",
+        "Benetton BMW": "Benetton",
+        "Benetton Renault": "Benetton",
+        "Benetton Playlife": "Benetton",
+        # Toyota
+        "Toyota": "Toyota",
+        # Jaguar
+        "Jaguar Cosworth": "Jaguar",
+        # Stewart
+        "Stewart Ford": "Stewart",
+        # BRM
+        "BRM": "BRM",
+        "BRM Climax": "BRM",
+        # JBW
+        "JBW Maserati": "JBW",
+        "JBW Climax": "JBW",
+        # Cooper
+        "Cooper Climax": "Cooper",
+        "Cooper Maserati": "Cooper",
+        "Cooper Bristol": "Cooper",
+        "Cooper Castellotti": "Cooper",
+        "Cooper BRM": "Cooper",
+        "Cooper JAP": "Cooper",
+        "Cooper Alta": "Cooper",
+        "Cooper Borgward": "Cooper",
+        "Cooper Alfa Romeo": "Cooper",
+        "Cooper Ferrari": "Cooper",
+        "Cooper ATS": "Cooper",
+        "Cooper Ford": "Cooper",
+        "Cooper OSCA": "Cooper",
+        # Brabham
+        "Brabham Climax": "Brabham",
+        "Brabham Repco": "Brabham",
+        "Brabham Ford": "Brabham",
+        "Brabham Alfa Romeo": "Brabham",
+        "Brabham BMW": "Brabham",
+        "Brabham BRM": "Brabham",
+        "Brabham Judd": "Brabham",
+        "Brabham Yamaha": "Brabham",
+        # Maserati
+        "Maserati": "Maserati",
+        "Maserati Offenhauser": "Maserati",
+        "Maserati Milano": "Maserati",
+        "Maserati-Offenhauser": "Maserati",
+        "Maserati OSCA": "Maserati",
+        "Maserati Plate": "Maserati",
+        # Ligier
+        "Ligier Matra": "Ligier",
+        "Ligier Ford": "Ligier",
+        "Ligier Renault": "Ligier",
+        "Ligier Megatron": "Ligier",
+        "Ligier Mugen Honda": "Ligier",
+        # Tyrrell
+        "Tyrrell Ford": "Tyrrell",
+        "Tyrrell Renault": "Tyrrell",
+        "Tyrrell Honda": "Tyrrell",
+        "Tyrrell Yamaha": "Tyrrell",
+        "Tyrrell Ilmor": "Tyrrell",
+        # Arrows/Footwork
+        "Arrows Ford": "Arrows",
+        "Arrows BMW": "Arrows",
+        "Arrows Megatron": "Arrows",
+        "Arrows Yamaha": "Arrows",
+        "Arrows Supertec": "Arrows",
+        "Arrows Asiatech": "Arrows",
+        "Arrows Cosworth": "Arrows",
+        "Arrows": "Arrows",
+        "Footwork Ford": "Footwork",
+        "Footwork Hart": "Footwork",
+        "Footwork Mugen Honda": "Footwork",
+        "Footwork Porsche": "Footwork",
+        # Vanwall
+        "Vanwall": "Vanwall",
+        # Wolf
+        "Wolf Ford": "Wolf",
+        "Wolf-Williams": "Wolf",
+        # Lola
+        "Lola Ford": "Lola",
+        "Lola Lamborghini": "Lola",
+        "Lola Climax": "Lola",
+        "Lola BMW": "Lola",
+        "Lola Hart": "Lola",
+        "Lola Ferrari": "Lola",
+        # March
+        "March Ford": "March",
+        "March Judd": "March",
+        "March Ilmor": "March",
+        "March Alfa Romeo": "March",
+        # Minardi
+        "Minardi Ford": "Minardi",
+        "Minardi Ferrari": "Minardi",
+        "Minardi Lamborghini": "Minardi",
+        "Minardi Asiatech": "Minardi",
+        "Minardi Cosworth": "Minardi",
+        "Minardi Fondmetal": "Minardi",
+        "Minardi European": "Minardi",
+        "Minardi Hart": "Minardi",
+        "Minardi Motori Moderni": "Minardi",
+        # LDS
+        "LDS Alfa Romeo": "LDS",
+        "LDS Climax": "LDS",
+        "LDS Repco": "LDS",
+        # Porche
+        "Porsche (F2)": "Porsche",
+        "Porsche": "Porsche",
+        "Behra-Porsche": "Porsche",
+        # Scirocco
+        "Scirocco BRM": "Scirocco",
+        "Scirocco Climax": "Scirocco",
+        # AFM
+        "AFM Kuchen": "AFM",
+        "AFM BMW": "AFM",
+        "AFM Bristol": "AFM",
+        # ATS
+        "ATS Ford": "ATS",
+        "ATS": "ATS",
+        "ATS BMW": "ATS",
+        "Derrington-Francis ATS": "ATS",
+        # Leyton House
+        "Leyton House Judd": "Leyton House",
+        "Leyton House Ilmor": "Leyton House",
+        # Prost
+        "Prost Mugen Honda": "Prost",
+        "Prost Peugeot": "Prost",
+        "Prost Acer": "Prost",
+        # Dallara
+        "Dallara Judd": "Dallara",
+        "Dallara Ferrari": "Dallara",
+        "Dallara Ford": "Dallara",
+        # Larrousse
+        "Larrousse Lamborghini": "Larrousse",
+        "Larrousse Ford": "Larrousse",
+        # Osella
+        "Osella Ford": "Osella",
+        "Osella Alfa Romeo": "Osella",
+        "Osella": "Osella",
+        "Osella Hart": "Osella",
+        # Kurtis Kraft
+        "Kurtis Kraft Offenhauser": "Kurtis Kraft",
+        "Kurtis Kraft Novi": "Kurtis Kraft",
+        "Kurtis Kraft Cummins": "Kurtis Kraft",
+        # Marussia
+        "Marussia Cosworth": "Marussia",
+        "Marussia Ferrari": "Marussia",
+        # Gordini
+        "Simca-Gordini": "Gordini",
+        "Gordini": "Gordini",
+        # Connaught
+        "Connaught Lea Francis": "Connaught",
+        "Connaught Alta": "Connaught",
+        # Eagle
+        "Eagle Climax": "Eagle",
+        "Eagle Weslake": "Eagle",
+        # RAM
+        "RAM Ford": "RAM",
+        "RAM Hart": "RAM",
+        # Shadow
+        "Shadow Ford": "Shadow",
+        "Shadow Matra": "Shadow",
+        # Matra
+        "Matra Ford": "Matra",
+        "Matra": "Matra",
+        "Matra Cosworth": "Matra",
+        "Matra BRM": "Matra",
+        # ERA
+        "ERA": "ERA",
+        "ERA Bristol": "ERA",
+        # Spirit
+        "Spirit Honda": "Spirit",
+        "Spirit Hart": "Spirit",
+        # Frazer Nash
+        "Frazer Nash": "Frazer Nash",
+        "Frazer Nash Bristol": "Frazer Nash",
+        # Emeryson
+        "Emeryson Alta": "Emeryson",
+        "Emeryson Climax": "Emeryson",
+        # De Tomaso
+        "De Tomaso OSCA": "De Tomaso",
+        "De Tomaso Alfa Romeo": "De Tomaso",
+        "De Tomaso Ford": "De Tomaso",
+        # Gilby
+        "Gilby Climax": "Gilby",
+        "Gilby BRM": "Gilby",
+        # Tecno
+        "Tecno": "Tecno",
+        "Tecno Cosworth": "Tecno",
+        # Ligier
+        "Ligier Judd": "Ligier",
+        "Ligier Lamborghini": "Ligier",
+        # Euro Brun
+        "Euro Brun Judd": "Euro Brun",
+        "Euro Brun Ford": "Euro Brun",
+        # Other
+        "No Team": "Privateer",
+        "Toleman Hart": "Toleman",
+        "Venturi Lamborghini": "Venturi",
+        "Onyx Ford": "Onyx",
+        "AGS Ford": "AGS",
+        "Rial Ford": "Rial",
+        "Zakspeed": "Zakspeed",
+        "Theodore Ford": "Theodore",
+        "Deidt Offenhauser": "Deidt",
+        "Sherman Offenhauser": "Sherman",
+        "Schroeder Offenhauser": "Schroeder",
+        "Kuzma Offenhauser": "Kuzma",
+        "Lesovsky Offenhauser": "Lesovsky",
+        "Watson Offenhauser": "Watson",
+        "Phillips Offenhauser": "Phillips",
+        "Epperly Offenhauser": "Epperly",
+        "Trevis Offenhauser": "Trevis",
+        "HRT Cosworth": "HRT",
+        "Virgin Cosworth": "Virgin",
+        "Caterham Renault": "Caterham",
+        "Milano Speluzzi": "Milano",
+        "Turner Offenhauser": "Turner",
+        "Alta": "Alta",
+        "Moore Offenhauser": "Moore",
+        "Nichels Offenhauser": "Nichels",
+        "Marchese Offenhauser": "Marchese",
+        "Stevens Offenhauser": "Stevens",
+        "Langley Offenhauser": "Langley",
+        "Ewing Offenhauser": "Ewing",
+        "Rae Offenhauser": "Rae",
+        "Olson Offenhauser": "Olson",
+        "Wetteroth Offerhauser": "Wetteroth",
+        "Snowberger Offenhauser": "Snowberger",
+        "Adams Offenhauser": "Adams",
+        "HWM Alta": "HWM",
+        "Lancia": "Lancia",
+        "Talbot-Lago": "Talbot-Lago",
+        "BRP BRM": "BRP",
+        "Hesketh Ford": "Hesketh",
+        "Hill Ford": "Hill",
+        "Ensign Ford": "Ensign",
+        "Penske Ford": "Penske",
+        "Fittipaldi Ford": "Fittipaldi",
+        "ISO Marlboro Ford": "ISO Marlboro",
+        "Iso Marlboro Ford": "ISO Marlboro",
+        "Surtees Ford": "Surtees",
+        "Parnelli Ford": "Parnelli",
+        "Super Aguri Honda": "Super Aguri",
+        "MRT Mercedes": "Manor",
+        "Brawn Mercedes": "Brawn",
+        "Spyker Ferrari": "Spyker",
+        "MF1 Toyota": "Midland",
+        "Veritas": "Veritas",
+        "Pawl Offenhauser": "Pawl",
+        "Hall Offenhauser": "Hall",
+        "Bromme Offenhauser": "Bromme",
+        "OSCA": "OSCA",
+        "BMW": "BMW",
+        "EMW": "EMW",
+        "Pankratz Offenhauser": "Pankratz",
+        "Bugatti": "Bugatti",
+        "Klenk BMW": "Klenk",
+        "Dunn Offenhauser": "Dunn",
+        "Elder Offenhauser": "Elder",
+        "Christensen Offenhauser": "Christensen",
+        "Sutton Offenhauser": "Sutton",
+        "Tec-Mec Maserati": "Tec-Mec",
+        "Meskowski Offenhauser": "Meskowski",
+        "Scarab": "Scarab",
+        "Ferguson Climax": "Ferguson",
+        "ENB Maserati": "ENB",
+        "Stebro Ford": "Stebro",
+        "Shannon Climax": "Shannon",
+        "Protos Cosworth": "Protos",
+        "Bellasi Ford": "Bellasi",
+        "Eifelland Ford": "Eifelland",
+        "Politoys Ford": "Politoys",
+        "Connew Ford": "Connew",
+        "Trojan Ford": "Trojan",
+        "Amon Ford": "Amon",
+        "Token Ford": "Token",
+        "Lyncar Ford": "Lyncar",
+        "Boro Ford": "Boro",
+        "Kojima Ford": "Kojima",
+        "LEC Ford": "LEC",
+        "Merzario Ford": "Merzario",
+        "Martini Ford": "Martini",
+        "Rebaque Ford": "Rebaque",
+        "AGS Motori Moderni": "AGS",
+        "Coloni Ford": "Coloni",
+        "Zakspeed Yamaha": "Zakspeed",
+        "Fondmetal Ford": "Fondmetal",
+        "Moda Judd": "Moda",
+        "Simtek Ford": "Simtek",
+        "Pacific Ilmor": "Pacific",
+        "Forti Ford": "Forti",
+        "Lambo Lamborghini": "Modena",
+    }
+}
