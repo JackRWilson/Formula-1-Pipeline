@@ -19,6 +19,8 @@ fastf1/
 catboost_info/
 data/*
 !data/.gitkeep
+!data/reference/
+!data/reference/curated_circuits.csv
 
 # Generated datasets and model outputs
 /data/raw_backup
