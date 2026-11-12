@@ -1,3 +1,4 @@
+from sqlalchemy.engine import Connection
 from sqlalchemy import text
 
 if __package__:
@@ -7,10 +8,17 @@ if __package__:
         RAW_CONTAINER,
         ExtractF1Site,
         ExtractFastF1,
+        ExtractJolpiDrivers,
         ExtractPhoton,
         ExtractWikipedia,
     )
-    from .transform import TransformCircuit, TransformLocation, TransformSeason
+    from .transform import (
+        TransformCircuit,
+        TransformConstructor,
+        TransformDriver,
+        TransformLocation,
+        TransformSeason,
+    )
     from .utils import download_df_from_blob
 else:
     from extract import (
@@ -19,10 +27,17 @@ else:
         RAW_CONTAINER,
         ExtractF1Site,
         ExtractFastF1,
+        ExtractJolpiDrivers,
         ExtractPhoton,
         ExtractWikipedia,
     )
-    from transform import TransformCircuit, TransformLocation, TransformSeason
+    from transform import (
+        TransformCircuit,
+        TransformConstructor,
+        TransformDriver,
+        TransformLocation,
+        TransformSeason,
+    )
     from utils import download_df_from_blob
 
 import pandas as pd
@@ -32,28 +47,29 @@ pd.set_option("display.width", 1000)
 
 
 class ETLProcessor:
-    def __init__(self, conn):
+    def __init__(self, conn: Connection) -> None:
         self._conn = conn
 
-    def process(self):
+    def process(self) -> None:
         print("ETL started")
         # ExtractF1Site(self._conn).extract()
         # circuits = ExtractWikipedia().extract()
         # ExtractPhoton().extract(circuits)
         # ExtractFastF1(self._conn).extract()
+        # ExtractJolpiDrivers().extract()
         # self.print_blob_heads()
 
         # season_df = TransformSeason(self._conn).transform()
-        circuit_df = TransformCircuit().transform()
-        location_df = TransformLocation().transform(circuit_df)
-        print("\nTransformed circuits:")
-        print(circuit_df.head())
-        print("\nTransformed locations:")
-        print(location_df.head())
+        # circuit_df = TransformCircuit().transform()
+        # location_df = TransformLocation().transform(circuit_df)
+        # constructor_df = TransformConstructor().transform()
+        driver_df = TransformDriver().transform()
+        print(driver_df)
+        driver_df.to_csv("driver_test.csv", index=False)
 
         print("ETL complete")
 
-    def print_blob_heads(self):
+    def print_blob_heads(self) -> None:
         print("\nSample rows from each successful F1 session blob:")
         sessions = self._conn.execute(text(f"""
                 select distinct on (session_type)
@@ -72,7 +88,7 @@ class ETLProcessor:
         self._print_blob_head("locations", "locations_raw.parquet")
         self._print_fastf1_blob_heads()
 
-    def _print_fastf1_blob_heads(self):
+    def _print_fastf1_blob_heads(self) -> None:
         sessions = self._conn.execute(text(f"""
                 select distinct on (s.session_name)
                     s.session_name, s.laps_blob_name, s.weather_blob_name,
@@ -92,7 +108,7 @@ class ETLProcessor:
                     )
 
     @staticmethod
-    def _print_blob_head(label, blob_name):
+    def _print_blob_head(label: str, blob_name: str) -> None:
         try:
             data = download_df_from_blob(RAW_CONTAINER, blob_name)
         except Exception as exc:

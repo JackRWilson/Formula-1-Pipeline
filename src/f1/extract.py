@@ -5,27 +5,35 @@ from pathlib import Path
 
 import fastf1
 import pandas as pd
+import requests
 from azure.core.exceptions import ResourceNotFoundError
+from fastf1.core import Session
 from fastf1.exceptions import DataNotLoadedError, RateLimitExceededError
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webdriver import WebDriver
 from sqlalchemy import text
+from sqlalchemy.engine import Connection, RowMapping
 
 if __package__:
-    from .project_functions import clean_circuit_name, get_date
     from .utils import (
+        clean_circuit_name,
         create_browser,
         download_df_from_blob,
+        get_blob_container_client,
+        get_date,
         get_location_data,
         print_progress_bar,
         scrape_url_table,
         upload_df_to_blob,
     )
 else:
-    from project_functions import clean_circuit_name, get_date
     from utils import (
+        clean_circuit_name,
         create_browser,
         download_df_from_blob,
+        get_blob_container_client,
+        get_date,
         get_location_data,
         print_progress_bar,
         scrape_url_table,
@@ -53,6 +61,18 @@ WIKIPEDIA_CIRCUITS_URL = "https://en.wikipedia.org/wiki/List_of_Formula_One_circ
 MAX_ROUNDS_BLOB = "max_rounds.parquet"
 WIKIPEDIA_CIRCUITS_BLOB = "circuits_raw.parquet"
 PHOTON_LOCATIONS_BLOB = "locations_raw.parquet"
+JOLPI_DRIVERS_URL = "https://api.jolpi.ca/f1/alpha/core/drivers/"
+JOLPI_DRIVERS_BLOB_PREFIX = "jolpi/drivers"
+JOLPI_DRIVER_COLUMNS = [
+    "season_year",
+    "source_driver_id",
+    "driver_code",
+    "first_name",
+    "last_name",
+    "nationality",
+    "country_code",
+    "date_of_birth",
+]
 logger = logging.getLogger(__name__)
 
 
@@ -60,7 +80,7 @@ class NoSessionDataError(ValueError):
     pass
 
 
-def expand_race_url_to_session_urls(race_url, year):
+def expand_race_url_to_session_urls(race_url: str, year: int) -> list[dict]:
     base_url = race_url.rsplit("/", 1)[0]
     session_types = [
         session_type
@@ -88,15 +108,15 @@ def expand_race_url_to_session_urls(race_url, year):
 
 
 class ExtractF1Site:
-    def __init__(self, conn):
+    def __init__(self, conn: Connection) -> None:
         self._conn = conn
 
-    def extract(self):
+    def extract(self) -> None:
         self.discover_sessions()
         self.extract_pending_sessions()
         self.extract_max_rounds()
 
-    def discover_sessions(self):
+    def discover_sessions(self) -> None:
         print("\nDiscovering F1 session URLs...")
         browser = create_browser()
         sessions = []
@@ -147,7 +167,8 @@ class ExtractF1Site:
             self._conn.commit()
         print(f"\nDiscovered {len(sessions)} session URLs.\n")
 
-    def extract_pending_sessions(self):
+    def extract_pending_sessions(self) -> None:
+        """Scrape pending or failed session pages and update their manifest status."""
         sessions = self._conn.execute(text(f"""
                 select url, year, round_number, session_type
                 from {F1SITE_MANIFEST_TABLE}
@@ -229,7 +250,7 @@ class ExtractF1Site:
             for url, error in failures:
                 logger.error("Failed to scrape %s: %s", url, error)
 
-    def _scrape_session(self, session, browser):
+    def _scrape_session(self, session: RowMapping, browser: WebDriver) -> pd.DataFrame:
         session_type = session["session_type"]
         year = session["year"]
 
@@ -237,10 +258,9 @@ class ExtractF1Site:
             min_col = max_col = 7
             col_idx_map = {
                 "date": get_date,
-                "driver_id": 2,
-                "team_id": 3,
-                "position": 0,
                 "driver_name": 2,
+                "team_name": 3,
+                "position": 0,
                 "points": 6,
             }
             page_lvl_cols = ["date"]
@@ -252,18 +272,16 @@ class ExtractF1Site:
                     + "_"
                     + current_browser.current_url.split("/")[5]
                 ),
-                "driver_id": 2,
+                "driver_name": 2,
                 "circuit_id": lambda current_browser: current_browser.find_element(
                     By.ID, "content-dropdown"
                 ).text,
-                "team_id": 3,
+                "team_name": 3,
                 "year": lambda _: year,
                 "race_url": lambda current_browser: current_browser.current_url,
                 "circuit_name": lambda current_browser: current_browser.find_element(
                     By.ID, "content-dropdown"
                 ).text,
-                "driver_name": 2,
-                "team_name": 3,
                 "end_position": 0,
                 "points": 6,
                 "laps_completed": 4,
@@ -279,8 +297,8 @@ class ExtractF1Site:
             min_col = max_col = 8
             col_idx_map = {
                 "date": get_date,
-                "driver_id": 2,
-                "team_id": 3,
+                "driver_name": 2,
+                "team_name": 3,
                 "stop_number": 0,
                 "stop_lap": 4,
                 "pits_time": 6,
@@ -294,8 +312,8 @@ class ExtractF1Site:
                     + "_"
                     + current_browser.current_url.split("/")[5]
                 ),
-                "driver_id": 2,
-                "team_id": 3,
+                "driver_name": 2,
+                "team_name": 3,
                 "stop_number": 0,
                 "stop_lap": 4,
                 "pits_time": 6,
@@ -309,8 +327,8 @@ class ExtractF1Site:
                     + "_"
                     + current_browser.current_url.split("/")[5]
                 ),
-                "driver_id": 2,
-                "team_id": 3,
+                "driver_name": 2,
+                "team_name": 3,
                 "session_type": lambda _: "practice/0",
                 "lap_time": 4,
                 "lap_count": 5,
@@ -328,8 +346,8 @@ class ExtractF1Site:
                     + "_"
                     + current_browser.current_url.split("/")[5]
                 ),
-                "driver_id": 2,
-                "team_id": 3,
+                "driver_name": 2,
+                "team_name": 3,
                 "session_type": lambda current_browser: "/".join(
                     current_browser.current_url.split("/")[9:11]
                 ),
@@ -350,8 +368,8 @@ class ExtractF1Site:
                     + "_"
                     + current_browser.current_url.split("/")[5]
                 ),
-                "driver_id": 2,
-                "team_id": 3,
+                "driver_name": 2,
+                "team_name": 3,
                 "q1_time": 4,
                 "q2_time": 5,
                 "q3_time": 6,
@@ -371,8 +389,8 @@ class ExtractF1Site:
                     + "_"
                     + current_browser.current_url.split("/")[5]
                 ),
-                "driver_id": 2,
-                "team_id": 3,
+                "driver_name": 2,
+                "team_name": 3,
                 "start_position": 0,
                 "session_type": lambda _: session_type,
             }
@@ -385,8 +403,8 @@ class ExtractF1Site:
                     + "_"
                     + current_browser.current_url.split("/")[5]
                 ),
-                "driver_id": 2,
-                "team_id": 3,
+                "driver_name": 2,
+                "team_name": 3,
                 "session_type": lambda _: "sprint",
                 "sprint_position": 0,
                 "laps_completed": 4,
@@ -402,8 +420,8 @@ class ExtractF1Site:
                     + "_"
                     + current_browser.current_url.split("/")[5]
                 ),
-                "driver_id": 2,
-                "team_id": 3,
+                "driver_name": 2,
+                "team_name": 3,
                 "fastest_lap_time": 6,
                 "lap_number": 4,
             }
@@ -416,7 +434,6 @@ class ExtractF1Site:
             min_col=min_col,
             max_col=max_col,
             col_idx_map=col_idx_map,
-            data_folder="",
             page_lvl_cols=page_lvl_cols,
             browser=browser,
             show_progress=False,
@@ -442,7 +459,7 @@ class ExtractF1Site:
         return data
 
     @staticmethod
-    def _page_has_result_rows(browser):
+    def _page_has_result_rows(browser: WebDriver) -> bool:
         for table in browser.find_elements(By.TAG_NAME, "table"):
             for row in table.find_elements(By.TAG_NAME, "tr")[1:]:
                 cells = row.find_elements(By.TAG_NAME, "td")
@@ -451,14 +468,14 @@ class ExtractF1Site:
         return False
 
     @staticmethod
-    def _blob_name(session):
+    def _blob_name(session: RowMapping) -> str:
         return (
             f"{session['session_type']}/{session['year']}/"
             f"{session['round_number']:02d}.parquet"
         )
 
     @staticmethod
-    def extract_driver_codes(browser, min_col, max_col):
+    def extract_driver_codes(browser: WebDriver, min_col: int, max_col: int) -> list:
         driver_codes = []
         for table in browser.find_elements(By.TAG_NAME, "table"):
             for row in table.find_elements(By.TAG_NAME, "tr")[1:]:
@@ -478,7 +495,7 @@ class ExtractF1Site:
                 driver_codes.append(code)
         return driver_codes
 
-    def extract_max_rounds(self):
+    def extract_max_rounds(self) -> None:
         years = range(DATA_START_YEAR, date.today().year + 1)
         browser = create_browser()
         max_rounds = []
@@ -520,10 +537,10 @@ class ExtractF1Site:
 
 
 class ExtractFastF1:
-    def __init__(self, conn):
+    def __init__(self, conn: Connection) -> None:
         self._conn = conn
 
-    def extract(self):
+    def extract(self) -> list[dict[str, object]]:
         FASTF1_CACHE_PATH.mkdir(parents=True, exist_ok=True)
         fastf1.Cache.configure(cache_dir=str(FASTF1_CACHE_PATH))
         logging.getLogger("fastf1").setLevel(logging.CRITICAL)
@@ -531,7 +548,7 @@ class ExtractFastF1:
         self.extract_pending_sessions()
         return sessions
 
-    def discover_sessions(self):
+    def discover_sessions(self) -> list[dict]:
         print("\nDiscovering FastF1 event schedules...")
         event_records = []
         session_records = []
@@ -612,7 +629,7 @@ class ExtractFastF1:
         return session_records
 
     @classmethod
-    def _schedule_records(cls, schedule, year):
+    def _schedule_records(cls, schedule: pd.DataFrame, year: int) -> tuple[list[dict], list[dict]]:
         event_records = []
         session_records = []
         for _, event in schedule.iterrows():
@@ -665,7 +682,7 @@ class ExtractFastF1:
         return event_records, session_records
 
     @staticmethod
-    def _is_missing(value):
+    def _is_missing(value: object) -> bool:
         if value is None:
             return True
         try:
@@ -674,14 +691,14 @@ class ExtractFastF1:
             return False
 
     @classmethod
-    def _string_or_none(cls, value):
+    def _string_or_none(cls, value: object) -> str:
         if cls._is_missing(value):
             return None
         value = str(value).strip()
         return value or None
 
     @classmethod
-    def _datetime_or_none(cls, value):
+    def _datetime_or_none(cls, value: object) -> datetime:
         if cls._is_missing(value):
             return None
         timestamp = pd.Timestamp(value)
@@ -690,13 +707,13 @@ class ExtractFastF1:
         return timestamp.to_pydatetime()
 
     @classmethod
-    def _timezone_or_none(cls, value):
+    def _timezone_or_none(cls, value: object) -> str:
         if cls._is_missing(value):
             return None
         timestamp = pd.Timestamp(value)
         return str(timestamp.tzinfo) if timestamp.tzinfo else None
 
-    def extract_pending_sessions(self):
+    def extract_pending_sessions(self) -> None:
         sessions = self._conn.execute(text(f"""
                 select s.season_year, s.round_number, s.session_number,
                     s.session_name, e.event_name, e.f1_api_support
@@ -780,7 +797,7 @@ class ExtractFastF1:
                     error,
                 )
 
-    def _extract_session(self, session_info):
+    def _extract_session(self, session_info: RowMapping) -> None:
         session = fastf1.get_session(
             session_info["season_year"],
             session_info["event_name"],
@@ -801,7 +818,7 @@ class ExtractFastF1:
         ).scalar()
         frames = {
             data_type: self._get_loaded_frame(
-                session, property_name, session_info, data_type
+                session, property_name
             )
             for data_type, property_name in (
                 ("laps", "laps"),
@@ -850,14 +867,14 @@ class ExtractFastF1:
         del session
 
     @staticmethod
-    def _get_loaded_frame(session, property_name):
+    def _get_loaded_frame(session: Session, property_name: str) -> pd.DataFrame:
         try:
             return getattr(session, property_name)
         except DataNotLoadedError:
             return pd.DataFrame()
 
     @staticmethod
-    def _blob_name(session_info, data_type):
+    def _blob_name(session_info: RowMapping, data_type: str) -> str:
         event_slug = re.sub(
             r"[^a-z0-9]+", "-", session_info["event_name"].lower()
         ).strip("-")
@@ -871,8 +888,107 @@ class ExtractFastF1:
         )
 
 
+class ExtractJolpiDrivers:
+    def extract(self) -> None:
+        current_year = date.today().year
+        container = get_blob_container_client(RAW_CONTAINER)
+        existing_blobs = {
+            blob.name
+            for blob in container.list_blobs(
+                name_starts_with=f"{JOLPI_DRIVERS_BLOB_PREFIX}/"
+            )
+        }
+        extracted_years = []
+
+        print(
+            f"\nExtracting Jolpi driver metadata for {DATA_START_YEAR}-{current_year}..."
+        )
+        years = range(DATA_START_YEAR, current_year + 1)
+        for year in years:
+            blob_name = self._blob_name(year)
+            if year < current_year and blob_name in existing_blobs:
+                cached = download_df_from_blob(RAW_CONTAINER, blob_name)
+                self._validate_cached_data(cached, blob_name)
+                logger.info("Using cached Jolpi driver metadata for %s", year)
+                continue
+
+            drivers = self._fetch_year(year)
+            upload_df_to_blob(drivers, RAW_CONTAINER, blob_name)
+            extracted_years.append(year)
+            logger.info("Stored %s Jolpi drivers for %s", len(drivers), year)
+
+        print(
+            f"Jolpi driver metadata complete; refreshed {len(extracted_years)} "
+            f"season(s): {extracted_years}\n"
+        )
+
+    @classmethod
+    def _fetch_year(cls, year: int) -> pd.DataFrame:
+        response = requests.get(
+            JOLPI_DRIVERS_URL,
+            params={"year": year},
+            timeout=(5, 30),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError(f"Jolpi returned an invalid driver response for {year}")
+
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, dict):
+            raise ValueError(f"Jolpi response for {year} is missing metadata")
+        total_pages = metadata.get("total_pages")
+        if total_pages != 1:
+            raise ValueError(
+                f"Jolpi returned {total_pages!r} pages for {year}; "
+                "expected one page for the season driver list"
+            )
+
+        rows = []
+        for driver in payload["data"]:
+            if not isinstance(driver, dict):
+                raise ValueError(f"Jolpi returned an invalid driver record for {year}")
+            if not driver.get("id"):
+                raise ValueError(f"Jolpi driver record for {year} is missing an id")
+
+            rows.append(
+                {
+                    "season_year": year,
+                    "source_driver_id": driver["id"],
+                    "driver_code": driver.get("abbreviation"),
+                    "first_name": driver.get("given_name"),
+                    "last_name": driver.get("family_name"),
+                    "nationality": driver.get("nationality"),
+                    "country_code": driver.get("country_code"),
+                    "date_of_birth": driver.get("date_of_birth"),
+                }
+            )
+
+        if not rows:
+            raise ValueError(f"Jolpi returned no drivers for {year}")
+        drivers = pd.DataFrame(rows, columns=JOLPI_DRIVER_COLUMNS)
+        dob = pd.to_datetime(drivers["date_of_birth"], errors="raise")
+        drivers["date_of_birth"] = dob.dt.date.where(dob.notna(), None)
+        return drivers
+
+    @staticmethod
+    def _validate_cached_data(data: pd.DataFrame, blob_name: str) -> None:
+        if not isinstance(data, pd.DataFrame):
+            raise TypeError(f"Cached Jolpi blob {blob_name!r} is not a DataFrame")
+        missing_columns = set(JOLPI_DRIVER_COLUMNS).difference(data.columns)
+        if missing_columns or data.empty:
+            raise ValueError(
+                f"Cached Jolpi blob {blob_name!r} is invalid "
+                f"(missing columns: {sorted(missing_columns)}, empty: {data.empty})"
+            )
+
+    @staticmethod
+    def _blob_name(year: int) -> str:
+        return f"{JOLPI_DRIVERS_BLOB_PREFIX}/{year}.parquet"
+
+
 class ExtractWikipedia:
-    def extract(self):
+    def extract(self) -> pd.DataFrame:
         print("\nScraping circuits from Wikipedia...")
         circuits = scrape_url_table(
             urls=[WIKIPEDIA_CIRCUITS_URL],
@@ -890,7 +1006,6 @@ class ExtractWikipedia:
                 "seasons": 9,
                 "gps_held": 10,
             },
-            data_folder="",
             raise_on_error=True,
         )
         if not isinstance(circuits, pd.DataFrame) or circuits.empty:
@@ -902,7 +1017,7 @@ class ExtractWikipedia:
 
 
 class ExtractPhoton:
-    def extract(self, circuits):
+    def extract(self, circuits: pd.DataFrame) -> pd.DataFrame:
         required_columns = {"name", "location", "country"}
         missing_columns = required_columns.difference(circuits.columns)
         if missing_columns:
@@ -973,7 +1088,7 @@ class ExtractPhoton:
         return locations
 
     @staticmethod
-    def _load_existing_locations():
+    def _load_existing_locations() -> pd.DataFrame:
         try:
             locations = download_df_from_blob(RAW_CONTAINER, PHOTON_LOCATIONS_BLOB)
         except ResourceNotFoundError:
