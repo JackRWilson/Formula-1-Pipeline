@@ -4,6 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from dynaconf import Dynaconf
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 
 SRC_ROOT = Path(__file__).resolve().parents[1]
 if str(SRC_ROOT) not in sys.path:
@@ -12,10 +13,10 @@ if str(SRC_ROOT) not in sys.path:
 from etl import ETLProcessor
 
 
-def run():
+def run() -> None:
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-    def build_engine():
+    def build_engine() -> Engine:
         settings = Dynaconf(envvar_prefix="DB", load_dotenv=True, dotenv_override=True)
         return create_engine(settings.ENGINE_URL, echo=False)
 

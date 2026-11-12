@@ -12,8 +12,9 @@ import numpy as np
 import pandas as pd
 import requests
 from azure.core.exceptions import ResourceExistsError
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, ContainerClient
 from dotenv import load_dotenv
+from numpy.typing import NDArray
 from selenium import webdriver
 from selenium.common.exceptions import (
     StaleElementReferenceException,
@@ -21,11 +22,13 @@ from selenium.common.exceptions import (
 )
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from sklearn.linear_model import LinearRegression
 
 logger = logging.getLogger(__name__)
+
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 SRC_ROOT = str(Path(PROJECT_ROOT) / "src")
@@ -36,7 +39,7 @@ MAX_ATTEMPTS = 3
 load_dotenv()
 
 
-def init_col_map(col_map: dict):
+def init_col_map(col_map: dict) -> dict:
     """
     Takes a {column_name: column_index} dictionary as an input and returns a new dictionary with
     indexes and empty lists
@@ -44,7 +47,7 @@ def init_col_map(col_map: dict):
     return {col: {"index": index, "values": []} for col, index in col_map.items()}
 
 
-def create_browser():
+def create_browser() -> WebDriver:
     """
     Creates a headless Chrome browser with logging suppressed
     """
@@ -59,10 +62,14 @@ def create_browser():
 _progress_start_time = None
 
 
-def print_progress_bar(current, total, bar_length=40, start_time=None):
+def print_progress_bar(
+    current: int,
+    total: int,
+    bar_length: int = 40,
+    start_time: float = None,
+) -> None:
     """
     Print a progress bar with ETA that updates on the same lines
-
     """
     global _progress_start_time
     if start_time is not None:
@@ -105,7 +112,7 @@ def print_progress_bar(current, total, bar_length=40, start_time=None):
         _progress_start_time = None
 
 
-def _extract_matching_rows(browser, min_col: int, max_col: int) -> list:
+def _extract_matching_rows(browser: WebDriver, min_col: int, max_col: int) -> list:
     """
     Return the cell texts of every table row on the current page whose
     <td> count falls within [min_col, max_col]. Each table's header row
@@ -140,8 +147,8 @@ def scrape_url_table(
     min_col: int,
     max_col: int,
     col_idx_map: dict,
-    page_lvl_cols: list = None,
-    browser=None,
+    page_lvl_cols: list | None = None,
+    browser: WebDriver = None,
     show_progress: bool = True,
     raise_on_error: bool = False,
     retry_delay: float = 1.0,
@@ -265,7 +272,7 @@ def scrape_url_table(
     return pd.DataFrame({name: info["values"] for name, info in col_data.items()})
 
 
-def get_date(browser):
+def get_date(browser: WebDriver) -> str:
     """
     Extract date with wait and retry
     """
@@ -295,8 +302,11 @@ def get_date(browser):
 
 
 def aggregate_columns(
-    df, columns: list = None, boolean_columns: list = None, string_columns: list = None
-):
+    df: pd.DataFrame,
+    columns: list | None = None,
+    boolean_columns: list | None = None,
+    string_columns: list | None = None,
+) -> pd.DataFrame:
     """
     Aggregation function that returns mean, min, max, and std values for numeric columns,
     boolean aggregation for True/False columns, and the first value for string columns.
@@ -418,7 +428,7 @@ def get_location_data(place: str, city: str, country: str) -> dict:
         return "error"
 
 
-def get_blob_container_client(container_name):
+def get_blob_container_client(container_name: str) -> ContainerClient:
     """
     Return an Azurite container client, creating the container if it doesn't exist yet
     """
@@ -433,7 +443,7 @@ def get_blob_container_client(container_name):
     return container_client
 
 
-def upload_df_to_blob(df, container_name, blob_name):
+def upload_df_to_blob(df: pd.DataFrame, container_name: str, blob_name: str) -> str:
     """
     Serialize a DataFrame to parquet in memory and upload it as a blob
     """
@@ -447,7 +457,7 @@ def upload_df_to_blob(df, container_name, blob_name):
     return hashlib.sha256(parquet_bytes).hexdigest()
 
 
-def download_df_from_blob(container_name, blob_name):
+def download_df_from_blob(container_name: str, blob_name: str) -> pd.DataFrame:
     """
     Download a parquet blob and load it back into a DataFrame
     """
@@ -457,7 +467,7 @@ def download_df_from_blob(container_name, blob_name):
     return pd.read_parquet(io.BytesIO(blob_bytes))
 
 
-def get_degradation_rate(lap_times, lap_numbers):
+def get_degradation_rate(lap_times: NDArray, lap_numbers: NDArray) -> float:
     """
     Calculates the degradation rate of tyres based on a linear regression
     """
@@ -473,7 +483,7 @@ def get_degradation_rate(lap_times, lap_numbers):
     return np.nan
 
 
-def compute_compound_stats(comp_data, compound) -> dict:
+def compute_compound_stats(comp_data: pd.DataFrame, compound: str) -> dict:
     """
     Calculate tyre compound statistics for a specific compount
     """
@@ -494,7 +504,11 @@ def compute_compound_stats(comp_data, compound) -> dict:
     }
 
 
-def process_lap_file(filepath, code_to_name_map, driver_id_map) -> pd.DataFrame:
+def process_lap_file(
+    filepath: Path,
+    code_to_name_map: dict,
+    driver_id_map: dict,
+) -> pd.DataFrame:
     """
     Process a single laps file and return aggregated driver stats
     """
@@ -568,7 +582,9 @@ def process_lap_file(filepath, code_to_name_map, driver_id_map) -> pd.DataFrame:
     return pd.DataFrame(summaries)
 
 
-def process_flag_file(filepath, basic_count_flags, string_columns) -> pd.DataFrame:
+def process_flag_file(
+    filepath: Path, basic_count_flags: list, string_columns: list
+) -> pd.DataFrame:
     """
     Process a single flag file and return aggregated stats
     """
@@ -651,10 +667,9 @@ def process_flag_file(filepath, basic_count_flags, string_columns) -> pd.DataFra
     return pd.DataFrame([agg])
 
 
-def convert_position(row, prev_position=None):
+def convert_position(row: pd.Series, prev_position: int | None = None) -> int:
     """
     Converts position to numeric, or changes classification to a number
-
     """
     try:
         return int(row["position"])
@@ -665,7 +680,7 @@ def convert_position(row, prev_position=None):
             return 1
 
 
-def clean_qualifying_times(df):
+def clean_qualifying_times(df: pd.DataFrame) -> pd.DataFrame:
     """
     Cleans qualifying session times and adds no_lap_time flags for Q1, Q2, Q3.
     Uses qualifying position to determine advancement and flags drivers with DNF/DNS/NA times.
@@ -751,7 +766,7 @@ def clean_qualifying_times(df):
     return df
 
 
-def clean_pit_time(time_str):
+def clean_pit_time(time_str: str) -> float:
     """
     Convert pit stop time from min:sec.millisec format to total seconds
     """
@@ -762,7 +777,7 @@ def clean_pit_time(time_str):
         return float(time_str)
 
 
-def impute_pit_times(row, pit_stops_bound):
+def impute_pit_times(row: pd.Series, pit_stops_bound: pd.DataFrame) -> float:
     current_race_id = row["race_id"]
     driver_id = row["driver_id"]
     team_id = row["team_id"]
@@ -809,10 +824,9 @@ def impute_pit_times(row, pit_stops_bound):
     return 0
 
 
-def clean_circuit_name(name):
+def clean_circuit_name(name: str) -> str:
     """
     Clean circuit name to remove special characters while keeping letters, spaces, hyphens, and international letters with accents
-
     """
     if not isinstance(name, str):
         return name
