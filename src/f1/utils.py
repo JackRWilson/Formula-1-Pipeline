@@ -17,13 +17,13 @@ from dotenv import load_dotenv
 from numpy.typing import NDArray
 from selenium import webdriver
 from selenium.common.exceptions import (
+    NoSuchElementException,
     StaleElementReferenceException,
-    WebDriverException,
+    TimeoutException,
 )
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from sklearn.linear_model import LinearRegression
 
@@ -35,7 +35,11 @@ SRC_ROOT = str(Path(PROJECT_ROOT) / "src")
 if SRC_ROOT not in sys.path:
     sys.path.insert(0, SRC_ROOT)
 MAX_ATTEMPTS = 3
-
+DATE_XPATH = (
+    "//p[contains(@class, 'display-s-bold')]"
+    "[following-sibling::p[contains(@class, 'body-xs-semibold')]]"
+)
+TRACK_XPATH = f"{DATE_XPATH}/following-sibling::p[contains(@class, 'body-xs-semibold')]"
 load_dotenv()
 
 
@@ -121,23 +125,11 @@ def _extract_matching_rows(browser: WebDriver, min_col: int, max_col: int) -> li
     matching_rows = []
     for table in browser.find_elements(By.TAG_NAME, "table"):
         for row in table.find_elements(By.TAG_NAME, "tr")[1:]:
-            try:
-                cells = row.find_elements(By.TAG_NAME, "td")
-                if not (min_col <= len(cells) <= max_col):
-                    continue
-
-                cell_texts = []
-                for cell in cells:
-                    try:
-                        cell_texts.append(cell.text.strip())
-                    except (StaleElementReferenceException, WebDriverException):
-                        cell_texts.append(None)
-            except (StaleElementReferenceException, WebDriverException):
-                logger.warning(
-                    "Skipping stale row while scraping table data.", exc_info=True
-                )
+            cells = row.find_elements(By.TAG_NAME, "td")
+            if not (min_col <= len(cells) <= max_col):
                 continue
 
+            cell_texts = [cell.text.strip() for cell in cells]
             matching_rows.append(cell_texts)
     return matching_rows
 
@@ -251,11 +243,16 @@ def scrape_url_table(
                         col_data[name]["values"].extend(values)
                     break
 
-                except Exception:
+                except Exception as error:
                     if attempt == MAX_ATTEMPTS:
                         if raise_on_error:
                             raise
-                        logger.warning("ERROR with %s", url, exc_info=True)
+                        logger.warning(
+                            "Failed to scrape %s after %d attempts (%s)",
+                            url,
+                            MAX_ATTEMPTS,
+                            type(error).__name__,
+                        )
                     else:
                         time.sleep(retry_delay)
 
@@ -272,33 +269,48 @@ def scrape_url_table(
     return pd.DataFrame({name: info["values"] for name, info in col_data.items()})
 
 
-def get_date(browser: WebDriver) -> str:
+def _wait_for_text(browser: WebDriver, xpath: str, timeout: int = 10) -> str:
     """
-    Extract date with wait and retry
+    Poll until the element exists and has non-empty text.
+    Finding the element and reading .text happen in the same poll, so a
+    re-render between the two just triggers another poll instead of a stale element.
+    """
+
+    def _read_text(driver: WebDriver):
+        try:
+            text = driver.find_element(By.XPATH, xpath).text.strip()
+        except (NoSuchElementException, StaleElementReferenceException):
+            return False
+        return text or False
+
+    return WebDriverWait(browser, timeout).until(_read_text)
+
+
+def get_date(browser: WebDriver) -> str | None:
+    """
+    Extract the date range, e.g. '06 - 08 Mar 2026'
     """
     try:
-        # Wait for the element to be present
-        element = WebDriverWait(browser, 10).until(
-            EC.presence_of_element_located(
-                (
-                    By.XPATH,
-                    "//div[@class='Container-module_container__0e4ac']//p[contains(@class, 'display-s-bold')]",
-                )
-            )
-        )
-
-        # Wait a bit for any re-rendering to finish
-        time.sleep(0.5)
-
-        # Get fresh reference to avoid stale element
-        element = browser.find_element(
-            By.XPATH,
-            "//div[@class='Container-module_container__0e4ac']//p[contains(@class, 'display-s-bold')]",
-        )
-        return element.text
-    except Exception as e:
-        print(f"Failed to extract date: {e}")
+        return _wait_for_text(browser, DATE_XPATH)
+    except TimeoutException:
+        print("Failed to extract date: element not found or empty")
         return None
+
+
+def get_track(browser: WebDriver) -> tuple[str | None, str | None]:
+    """
+    Extract (circuit, city), e.g. ('Albert Park Grand Prix Circuit', 'Melbourne')
+    """
+    try:
+        text = _wait_for_text(browser, TRACK_XPATH)
+    except TimeoutException:
+        print("Failed to extract track: element not found or empty")
+        return None, None
+
+    circuit, separator, city = text.rpartition(", ")
+    if not separator:
+        return text, None
+    return circuit, city
 
 
 def aggregate_columns(

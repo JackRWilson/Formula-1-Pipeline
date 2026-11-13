@@ -23,6 +23,7 @@ if __package__:
         get_blob_container_client,
         get_date,
         get_location_data,
+        get_track,
         print_progress_bar,
         scrape_url_table,
         upload_df_to_blob,
@@ -35,6 +36,7 @@ else:
         get_blob_container_client,
         get_date,
         get_location_data,
+        get_track,
         print_progress_bar,
         scrape_url_table,
         upload_df_to_blob,
@@ -221,7 +223,12 @@ class ExtractF1Site:
                     self._conn.commit()
                 except Exception as error:
                     self._conn.rollback()
-                    failures.append((session["url"], error))
+                    failures.append(session["url"])
+                    logger.warning(
+                        "Failed to scrape %s (%s)",
+                        session["url"],
+                        type(error).__name__,
+                    )
                     self._conn.execute(
                         text(f"""
                             update {F1SITE_MANIFEST_TABLE}
@@ -244,11 +251,9 @@ class ExtractF1Site:
             )
         if failures:
             print(
-                f"\n{len(failures)} session page(s) failed and remain retryable "
-                "in the manifest.\n"
+                f"\n{len(failures)} URL(s) failed; their manifest entries remain "
+                "retryable. Run the scraper again to retry them.\n"
             )
-            for url, error in failures:
-                logger.error("Failed to scrape %s: %s", url, error)
 
     def _scrape_session(self, session: RowMapping, browser: WebDriver) -> pd.DataFrame:
         session_type = session["session_type"]
@@ -273,25 +278,27 @@ class ExtractF1Site:
                     + current_browser.current_url.split("/")[5]
                 ),
                 "driver_name": 2,
-                "circuit_id": lambda current_browser: current_browser.find_element(
+                "date": get_date,
+                "race_name": lambda current_browser: current_browser.find_element(
                     By.ID, "content-dropdown"
                 ).text,
+                "circuit_name": lambda current_browser: get_track(current_browser)[0],
+                "city": lambda current_browser: get_track(current_browser)[1],
                 "team_name": 3,
                 "year": lambda _: year,
                 "race_url": lambda current_browser: current_browser.current_url,
-                "circuit_name": lambda current_browser: current_browser.find_element(
-                    By.ID, "content-dropdown"
-                ).text,
                 "end_position": 0,
                 "points": 6,
                 "laps_completed": 4,
             }
             page_lvl_cols = [
                 "race_id",
-                "circuit_id",
+                "date",
+                "race_name",
+                "circuit_name",
+                "city",
                 "year",
                 "race_url",
-                "circuit_name",
             ]
         elif session_type == "pit-stop-summary" and 2016 <= year <= 2017:
             min_col = max_col = 8
@@ -629,7 +636,9 @@ class ExtractFastF1:
         return session_records
 
     @classmethod
-    def _schedule_records(cls, schedule: pd.DataFrame, year: int) -> tuple[list[dict], list[dict]]:
+    def _schedule_records(
+        cls, schedule: pd.DataFrame, year: int
+    ) -> tuple[list[dict], list[dict]]:
         event_records = []
         session_records = []
         for _, event in schedule.iterrows():
@@ -817,9 +826,7 @@ class ExtractFastF1:
             },
         ).scalar()
         frames = {
-            data_type: self._get_loaded_frame(
-                session, property_name
-            )
+            data_type: self._get_loaded_frame(session, property_name)
             for data_type, property_name in (
                 ("laps", "laps"),
                 ("weather", "weather_data"),
