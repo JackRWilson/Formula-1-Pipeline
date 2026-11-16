@@ -1,11 +1,15 @@
+import logging
 import re
 import unicodedata
 from pathlib import Path
 
 import pandas as pd
 from azure.storage.blob import ContainerClient
+from rapidfuzz import fuzz, process
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
+
+logger = logging.getLogger(__name__)
 
 if __package__:
     from .extract import (
@@ -68,6 +72,30 @@ JOLPI_DRIVERS_PATTERN = re.compile(
     rf"^{re.escape(JOLPI_DRIVERS_BLOB_PREFIX)}/(?P<year>\d{{4}})\.parquet$"
 )
 INT_GROUPS = ("year", "round")
+
+CIRCUIT_FUZZY_SCORE_CUTOFF = 90
+CIRCUIT_GENERIC_WORDS = {
+    "circuit",
+    "circuito",
+    "autodromo",
+    "autodrom",
+    "international",
+    "internacional",
+    "internazionale",
+    "grand",
+    "prix",
+    "street",
+    "track",
+    "racing",
+    "course",
+    "de",
+    "di",
+    "del",
+    "do",
+    "of",
+    "the",
+    "e",
+}
 
 
 def list_blobs_matching(
@@ -578,3 +606,225 @@ class TransformDriver:
         out["date_of_birth"] = pd.to_datetime(out["date_of_birth"], errors="coerce")
         out = out.drop(columns=["source_driver_id"])
         return out.sort_values(["last_name", "first_name"]).reset_index(drop=True)
+
+
+class TransformRace:
+    def transform(self, circuit_df: pd.DataFrame) -> pd.DataFrame:
+        races_df = self._extract_races()
+        races_df = self._group_race_date(races_df)
+        races_df = self._clean_date(races_df)
+        races_df = self._standardize_circuit_names(races_df, circuit_df)
+        return races_df
+
+    def _extract_races(self) -> pd.DataFrame:
+        container = get_blob_container_client(RAW_CONTAINER)
+        blob_index = list_session_blobs(container)
+        race_results = blob_index[blob_index["session"] == "race-result"]
+        if race_results.empty:
+            raise ValueError("No F1 session blobs found for race extraction")
+
+        frames = []
+        for row in race_results.itertuples():
+            df = get_blob(row.blob_name)
+            df["round"] = row.round
+            _require_columns(df, {"race_id", "year", "round"}, row.blob_name)
+            frames.append(df)
+        return pd.concat(frames, ignore_index=True).drop_duplicates()
+
+    def _group_race_date(self, races_df: pd.DataFrame) -> pd.DataFrame:
+        return (
+            races_df.groupby("race_id")[
+                [
+                    "year",
+                    "round",
+                    "circuit_name",
+                    "city",
+                    "race_name",
+                    "date",
+                    "race_url",
+                ]
+            ]
+            .first()
+            .reset_index()
+        )
+
+    def _clean_date(self, races_df: pd.DataFrame) -> pd.DataFrame:
+        has_range = races_df["date"].str.contains("-", na=False)
+        races_df.loc[has_range, "date"] = (
+            races_df.loc[has_range, "date"].str.split("-").str[1].str.strip()
+        )
+        races_df["date"] = pd.to_datetime(
+            races_df["date"], format="mixed", errors="coerce"
+        )
+        return (
+            races_df.rename(
+                columns={
+                    "year": "season_year",
+                    "date": "race_date",
+                    "race_url": "source_url",
+                }
+            )
+            .sort_values(by=["season_year", "round"])
+            .reset_index(drop=True)
+        )
+
+    def _standardize_circuit_names(
+        self, races_df: pd.DataFrame, df_circuit: pd.DataFrame
+    ) -> pd.DataFrame:
+        circuit_name_map = self._build_circuit_name_map(races_df, df_circuit)
+
+        races_df["circuit_name"] = (
+            races_df["circuit_name"]
+            .map(circuit_name_map)
+            .fillna(races_df["circuit_name"])
+        )
+        return races_df
+
+    def _build_circuit_name_map(
+        self, races_df: pd.DataFrame, df_circuit: pd.DataFrame
+    ) -> dict:
+        df_circuit_keyed = self._add_circuit_match_keys(df_circuit)
+
+        raw_names = races_df["circuit_name"].dropna().unique().tolist()
+        circuit_name_map = {}
+        claimed_circuit_keys = set()
+
+        # Exact match on normalized key
+        self._match_circuit_names_by_exact_key(
+            raw_names, df_circuit_keyed, circuit_name_map, claimed_circuit_keys
+        )
+
+        # Fuzzy match, leftovers only
+        unresolved_names = [n for n in raw_names if n not in circuit_name_map]
+        self._match_circuit_names_by_fuzzy_key(
+            unresolved_names, df_circuit_keyed, circuit_name_map, claimed_circuit_keys
+        )
+
+        # City fallback, leftovers only
+        unresolved_names = [n for n in raw_names if n not in circuit_name_map]
+        self._match_circuit_names_by_city(
+            unresolved_names,
+            races_df,
+            df_circuit_keyed,
+            circuit_name_map,
+            claimed_circuit_keys,
+        )
+
+        for name in raw_names:
+            if name not in circuit_name_map:
+                logger.warning("No circuit match found for race circuit name: %r", name)
+
+        return circuit_name_map
+
+    def _add_circuit_match_keys(self, df_circuit: pd.DataFrame) -> pd.DataFrame:
+        df_circuit_keyed = df_circuit.copy()
+        df_circuit_keyed["circuit_key"] = df_circuit_keyed["circuit_name"].map(
+            self._normalize_circuit_name
+        )
+        df_circuit_keyed["city_key"] = df_circuit_keyed["location_city"].map(
+            self._normalize_city
+        )
+
+        duplicated_keys = df_circuit_keyed[
+            df_circuit_keyed["circuit_key"].duplicated(keep=False)
+        ]
+        if not duplicated_keys.empty:
+            raise ValueError(
+                "Circuit names collapse to the same key; adjust CIRCUIT_GENERIC_WORDS:\n"
+                f"{duplicated_keys[['circuit_name', 'circuit_key']]}"
+            )
+        return df_circuit_keyed
+
+    def _match_circuit_names_by_exact_key(
+        self, raw_names, df_circuit_keyed, circuit_name_map, claimed_circuit_keys
+    ) -> None:
+        canonical_name_by_key = dict(
+            zip(df_circuit_keyed["circuit_key"], df_circuit_keyed["circuit_name"])
+        )
+        for raw_name in raw_names:
+            circuit_key = self._normalize_circuit_name(raw_name)
+            if circuit_key in canonical_name_by_key:
+                circuit_name_map[raw_name] = canonical_name_by_key[circuit_key]
+                claimed_circuit_keys.add(circuit_key)
+
+    def _match_circuit_names_by_fuzzy_key(
+        self, unresolved_names, df_circuit_keyed, circuit_name_map, claimed_circuit_keys
+    ) -> None:
+        canonical_name_by_key = dict(
+            zip(df_circuit_keyed["circuit_key"], df_circuit_keyed["circuit_name"])
+        )
+        unclaimed_circuit_keys = set(canonical_name_by_key) - claimed_circuit_keys
+
+        for raw_name in sorted(unresolved_names):
+            if not unclaimed_circuit_keys:
+                break
+            best_match = process.extractOne(
+                self._normalize_circuit_name(raw_name),
+                list(unclaimed_circuit_keys),
+                scorer=fuzz.token_set_ratio,
+                score_cutoff=CIRCUIT_FUZZY_SCORE_CUTOFF,
+            )
+            if best_match is None:
+                continue
+            matched_key, score, _ = best_match
+            circuit_name_map[raw_name] = canonical_name_by_key[matched_key]
+            claimed_circuit_keys.add(matched_key)
+            unclaimed_circuit_keys.discard(matched_key)
+            logger.info(
+                "Fuzzy circuit match: %r -> %r (score %.0f)",
+                raw_name,
+                canonical_name_by_key[matched_key],
+                score,
+            )
+
+    def _match_circuit_names_by_city(
+        self,
+        unresolved_names,
+        races_df,
+        df_circuit_keyed,
+        circuit_name_map,
+        claimed_circuit_keys,
+    ) -> None:
+        if not unresolved_names:
+            return
+
+        df_unclaimed_circuits = df_circuit_keyed[
+            ~df_circuit_keyed["circuit_key"].isin(claimed_circuit_keys)
+        ]
+        unclaimed_names_by_city_key = df_unclaimed_circuits.groupby("city_key")[
+            "circuit_name"
+        ].agg(list)
+
+        city_by_raw_name = (
+            races_df.dropna(subset=["circuit_name"])
+            .groupby("circuit_name")["city"]
+            .first()
+        )
+
+        for raw_name in unresolved_names:
+            city_key = self._normalize_city(city_by_raw_name.get(raw_name))
+            candidate_names = unclaimed_names_by_city_key.get(city_key, [])
+            if len(candidate_names) == 1:
+                circuit_name_map[raw_name] = candidate_names[0]
+                claimed_circuit_keys.add(
+                    self._normalize_circuit_name(candidate_names[0])
+                )
+                logger.info(
+                    "City circuit match: %r -> %r", raw_name, candidate_names[0]
+                )
+
+    @staticmethod
+    def _strip_accents(text: str) -> str:
+        decomposed = unicodedata.normalize("NFKD", text)
+        return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+    def _normalize_circuit_name(self, name: str) -> str:
+        text = self._strip_accents(name).lower()
+        text = re.sub(r"[^a-z0-9]+", " ", text)
+        tokens = [t for t in text.split() if t not in CIRCUIT_GENERIC_WORDS]
+        return " ".join(tokens)
+
+    def _normalize_city(self, city) -> str:
+        if pd.isna(city):
+            return ""
+        return self._strip_accents(str(city)).lower().strip()
