@@ -1,7 +1,6 @@
 import logging
 import re
 from datetime import date, datetime
-from pathlib import Path
 
 import fastf1
 import pandas as pd
@@ -15,98 +14,43 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, RowMapping
 
-if __package__:
-    from .utils import (
-        clean_circuit_name,
-        create_browser,
-        download_df_from_blob,
-        get_blob_container_client,
-        get_date,
-        get_location_data,
-        get_track,
-        print_progress_bar,
-        scrape_url_table,
-        upload_df_to_blob,
-    )
-else:
-    from utils import (
-        clean_circuit_name,
-        create_browser,
-        download_df_from_blob,
-        get_blob_container_client,
-        get_date,
-        get_location_data,
-        get_track,
-        print_progress_bar,
-        scrape_url_table,
-        upload_df_to_blob,
-    )
-
-SESSION_SUFFIXES_BY_SESSION_TYPE = {
-    "race-result": 2001,
-    "pit-stop-summary": 2016,
-}
-DATA_START_YEAR = 2018
-SPRINT_START_YEAR = 2021
-SPRINT_SESSION_TYPES = (
-    "sprint-qualifying",
-    "sprint-grid",
-    "sprint-results",
+from f1.constants import (
+    DATA_START_YEAR,
+    F1SITE_MANIFEST_TABLE,
+    FASTF1_CACHE_PATH,
+    FASTF1_EVENT_TABLE,
+    FASTF1_SESSION_TABLE,
+    FASTF1_START_YEAR,
+    JOLPI_DRIVER_COLUMNS,
+    JOLPI_DRIVERS_BLOB_PREFIX,
+    JOLPI_DRIVERS_URL,
+    MAX_ROUNDS_BLOB,
+    PHOTON_LOCATIONS_BLOB,
+    RAW_CONTAINER,
+    SESSION_SUFFIXES_BY_SESSION_TYPE,
+    SPRINT_SESSION_TYPES,
+    SPRINT_START_YEAR,
+    WIKIPEDIA_CIRCUITS_BLOB,
+    WIKIPEDIA_CIRCUITS_URL,
 )
-F1SITE_MANIFEST_TABLE = "formula_one.f1site_scrape_manifest"
-RAW_CONTAINER = "f1-raw"
-FASTF1_START_YEAR = 2018
-FASTF1_SESSION_TABLE = "formula_one.fastf1_scrape_manifest"
-FASTF1_EVENT_TABLE = "formula_one.fastf1_event_schedule"
-FASTF1_CACHE_PATH = Path(__file__).resolve().parents[2] / "data" / "cache"
-WIKIPEDIA_CIRCUITS_URL = "https://en.wikipedia.org/wiki/List_of_Formula_One_circuits"
-MAX_ROUNDS_BLOB = "max_rounds.parquet"
-WIKIPEDIA_CIRCUITS_BLOB = "circuits_raw.parquet"
-PHOTON_LOCATIONS_BLOB = "locations_raw.parquet"
-JOLPI_DRIVERS_URL = "https://api.jolpi.ca/f1/alpha/core/drivers/"
-JOLPI_DRIVERS_BLOB_PREFIX = "jolpi/drivers"
-JOLPI_DRIVER_COLUMNS = [
-    "season_year",
-    "source_driver_id",
-    "driver_code",
-    "first_name",
-    "last_name",
-    "nationality",
-    "country_code",
-    "date_of_birth",
-]
+from f1.utils import (
+    clean_circuit_name,
+    create_browser,
+    download_df_from_blob,
+    get_blob_container_client,
+    get_date,
+    get_location_data,
+    get_track,
+    print_progress_bar,
+    scrape_url_table,
+    upload_df_to_blob,
+)
+
 logger = logging.getLogger(__name__)
 
 
 class NoSessionDataError(ValueError):
     pass
-
-
-def expand_race_url_to_session_urls(race_url: str, year: int) -> list[dict]:
-    base_url = race_url.rsplit("/", 1)[0]
-    session_types = [
-        session_type
-        for session_type, first_year in SESSION_SUFFIXES_BY_SESSION_TYPE.items()
-        if year >= first_year
-    ]
-    if year >= DATA_START_YEAR:
-        if year == 2020 and "/emilia-romagna/" in race_url:
-            session_types.append("practice/0")
-        else:
-            session_types.extend(("practice/1", "practice/2", "practice/3"))
-        session_types.extend(("qualifying", "starting-grid", "fastest-laps"))
-    if year >= SPRINT_START_YEAR:
-        session_types.extend(SPRINT_SESSION_TYPES)
-
-    sessions = [
-        {
-            "url": f"{base_url}/{session_type}",
-            "year": year,
-            "session_type": session_type,
-        }
-        for session_type in session_types
-    ]
-    return sessions
 
 
 class ExtractF1Site:
@@ -148,7 +92,9 @@ class ExtractF1Site:
                             continue
 
                         round_number += 1
-                        for session in expand_race_url_to_session_urls(race_url, year):
+                        for session in self._expand_race_url_to_session_urls(
+                            race_url, year
+                        ):
                             sessions.append({**session, "round_number": round_number})
 
                 print_progress_bar(year - 2000, newest_year - 2000)
@@ -171,12 +117,18 @@ class ExtractF1Site:
 
     def extract_pending_sessions(self) -> None:
         """Scrape pending or failed session pages and update their manifest status."""
-        sessions = self._conn.execute(text(f"""
+        sessions = (
+            self._conn.execute(
+                text(f"""
                 select url, year, round_number, session_type
                 from {F1SITE_MANIFEST_TABLE}
                 where status in ('pending', 'failed')
                 order by year, round_number, session_type
-                """)).mappings().all()
+                """)
+            )
+            .mappings()
+            .all()
+        )
         if not sessions:
             print("No pending session pages to scrape.\n")
             return
@@ -279,9 +231,9 @@ class ExtractF1Site:
                 ),
                 "driver_name": 2,
                 "date": get_date,
-                "race_name": lambda current_browser: current_browser.find_element(
-                    By.ID, "content-dropdown"
-                ).text,
+                "race_name": lambda current_browser: (
+                    current_browser.find_element(By.ID, "content-dropdown").text
+                ),
                 "circuit_name": lambda current_browser: get_track(current_browser)[0],
                 "city": lambda current_browser: get_track(current_browser)[1],
                 "team_name": 3,
@@ -614,7 +566,8 @@ class ExtractFastF1:
                     """),
                 session_records,
             )
-            self._conn.execute(text(f"""
+            self._conn.execute(
+                text(f"""
                 update {FASTF1_SESSION_TABLE} s
                 set status = case
                     when e.f1_api_support then 'pending'
@@ -628,7 +581,8 @@ class ExtractFastF1:
                         (e.f1_api_support and s.status = 'unavailable')
                         or (not e.f1_api_support and s.status in ('pending', 'failed'))
                     )
-                """))
+                """)
+            )
         self._conn.commit()
         print(
             f"\nDiscovered {len(event_records)} FastF1 events and {len(session_records)} sessions.\n"
@@ -691,6 +645,33 @@ class ExtractFastF1:
         return event_records, session_records
 
     @staticmethod
+    def _expand_race_url_to_session_urls(race_url: str, year: int) -> list[dict]:
+        base_url = race_url.rsplit("/", 1)[0]
+        session_types = [
+            session_type
+            for session_type, first_year in SESSION_SUFFIXES_BY_SESSION_TYPE.items()
+            if year >= first_year
+        ]
+        if year >= DATA_START_YEAR:
+            if year == 2020 and "/emilia-romagna/" in race_url:
+                session_types.append("practice/0")
+            else:
+                session_types.extend(("practice/1", "practice/2", "practice/3"))
+            session_types.extend(("qualifying", "starting-grid", "fastest-laps"))
+        if year >= SPRINT_START_YEAR:
+            session_types.extend(SPRINT_SESSION_TYPES)
+
+        sessions = [
+            {
+                "url": f"{base_url}/{session_type}",
+                "year": year,
+                "session_type": session_type,
+            }
+            for session_type in session_types
+        ]
+        return sessions
+
+    @staticmethod
     def _is_missing(value: object) -> bool:
         if value is None:
             return True
@@ -723,7 +704,9 @@ class ExtractFastF1:
         return str(timestamp.tzinfo) if timestamp.tzinfo else None
 
     def extract_pending_sessions(self) -> None:
-        sessions = self._conn.execute(text(f"""
+        sessions = (
+            self._conn.execute(
+                text(f"""
                 select s.season_year, s.round_number, s.session_number,
                     s.session_name, e.event_name, e.f1_api_support
                 from {FASTF1_SESSION_TABLE} s
@@ -743,7 +726,11 @@ class ExtractFastF1:
                         ) <= now()
                     )
                 order by s.season_year, s.round_number, s.session_number
-                """)).mappings().all()
+                """)
+            )
+            .mappings()
+            .all()
+        )
         if not sessions:
             print("No pending FastF1 sessions to extract.\n")
             return
@@ -1089,8 +1076,7 @@ class ExtractPhoton:
                     ", ".join(places),
                 )
         print(
-            f"Stored {len(new_locations)} new location rows "
-            f"({len(locations)} total).\n"
+            f"Stored {len(new_locations)} new location rows ({len(locations)} total).\n"
         )
         return locations
 

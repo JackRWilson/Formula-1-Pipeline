@@ -3,7 +3,6 @@ import io
 import logging
 import os
 import re
-import sys
 import time
 import unicodedata
 from pathlib import Path
@@ -27,19 +26,20 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support.ui import WebDriverWait
 from sklearn.linear_model import LinearRegression
 
+from f1.constants import (
+    DATA_START_YEAR,
+    FASTF1_BLOB_PATTERN,
+    INT_GROUPS,
+    JOLPI_DRIVERS_BLOB_PREFIX,
+    JOLPI_DRIVERS_PATTERN,
+    RAW_CONTAINER,
+    SESSION_BLOB_PATTERN,
+    SESSIONS,
+)
+
 logger = logging.getLogger(__name__)
 
 
-PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
-SRC_ROOT = str(Path(PROJECT_ROOT) / "src")
-if SRC_ROOT not in sys.path:
-    sys.path.insert(0, SRC_ROOT)
-MAX_ATTEMPTS = 3
-DATE_XPATH = (
-    "//p[contains(@class, 'display-s-bold')]"
-    "[following-sibling::p[contains(@class, 'body-xs-semibold')]]"
-)
-TRACK_XPATH = f"{DATE_XPATH}/following-sibling::p[contains(@class, 'body-xs-semibold')]"
 load_dotenv()
 
 
@@ -132,6 +132,9 @@ def _extract_matching_rows(browser: WebDriver, min_col: int, max_col: int) -> li
             cell_texts = [cell.text.strip() for cell in cells]
             matching_rows.append(cell_texts)
     return matching_rows
+
+
+MAX_ATTEMPTS = 3  # Max attempts to scrape url
 
 
 def scrape_url_table(
@@ -286,6 +289,12 @@ def _wait_for_text(browser: WebDriver, xpath: str, timeout: int = 10) -> str:
     return WebDriverWait(browser, timeout).until(_read_text)
 
 
+DATE_XPATH = (
+    "//p[contains(@class, 'display-s-bold')]"
+    "[following-sibling::p[contains(@class, 'body-xs-semibold')]]"
+)
+
+
 def get_date(browser: WebDriver) -> str | None:
     """
     Extract the date range, e.g. '06 - 08 Mar 2026'
@@ -295,6 +304,9 @@ def get_date(browser: WebDriver) -> str | None:
     except TimeoutException:
         print("Failed to extract date: element not found or empty")
         return None
+
+
+TRACK_XPATH = f"{DATE_XPATH}/following-sibling::p[contains(@class, 'body-xs-semibold')]"
 
 
 def get_track(browser: WebDriver) -> tuple[str | None, str | None]:
@@ -479,6 +491,79 @@ def download_df_from_blob(container_name: str, blob_name: str) -> pd.DataFrame:
     return pd.read_parquet(io.BytesIO(blob_bytes))
 
 
+def get_blob(blob_name: str) -> pd.DataFrame:
+    data = download_df_from_blob(RAW_CONTAINER, blob_name)
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError(f"Blob {blob_name!r} did not contain a DataFrame")
+    return data
+
+
+def load_blobs(blob_index: pd.DataFrame) -> pd.DataFrame:
+    frames = []
+    for row in blob_index.itertuples(index=False):
+        df = get_blob(row.blob_name)
+        meta = {k: v for k, v in row._asdict().items() if k != "blob_name"}
+        frames.append(df.assign(**meta))
+    if not frames:
+        raise ValueError("No blobs to load; check the pattern and prefixes")
+    return pd.concat(frames, ignore_index=True)
+
+
+def list_blobs_matching(
+    container_client: ContainerClient,
+    pattern: re.Pattern,
+    prefixes: list | None = None,
+    min_year: int | None = None,
+) -> pd.DataFrame:
+    rows = []
+    for prefix in prefixes or [None]:
+        for blob in container_client.list_blobs(name_starts_with=prefix):
+            m = pattern.match(blob.name)
+            if m is None:
+                continue
+            row = {"blob_name": blob.name, **m.groupdict()}
+            for key in INT_GROUPS:
+                if row.get(key) is not None:
+                    row[key] = int(row[key])
+            if (
+                min_year is not None
+                and row.get("year") is not None
+                and row["year"] < min_year
+            ):
+                continue
+            rows.append(row)
+
+    columns = ["blob_name", *pattern.groupindex]
+    return pd.DataFrame(rows, columns=columns)
+
+
+def list_session_blobs(container_client: ContainerClient) -> pd.DataFrame:
+    return list_blobs_matching(
+        container_client,
+        SESSION_BLOB_PATTERN,
+        prefixes=[f"{session}/" for session in SESSIONS],
+        min_year=DATA_START_YEAR,
+    )
+
+
+def list_jolpi_driver_blobs(container_client: ContainerClient) -> pd.DataFrame:
+    return list_blobs_matching(
+        container_client,
+        JOLPI_DRIVERS_PATTERN,
+        prefixes=[f"{JOLPI_DRIVERS_BLOB_PREFIX}/"],
+        min_year=DATA_START_YEAR,
+    )
+
+
+def list_fastf1_blobs(container_client: ContainerClient) -> pd.DataFrame:
+    return list_blobs_matching(
+        container_client,
+        FASTF1_BLOB_PATTERN,
+        prefixes=["fastf1/"],
+        min_year=DATA_START_YEAR,
+    )
+
+
 def get_degradation_rate(lap_times: NDArray, lap_numbers: NDArray) -> float:
     """
     Calculates the degradation rate of tyres based on a linear regression
@@ -609,7 +694,7 @@ def process_flag_file(
     # Count each flag type
     if "Flag" in fh.columns:
         for flag in basic_count_flags:
-            agg[f'flag_{flag.lower().replace(" ", "_")}_count'] = (
+            agg[f"flag_{flag.lower().replace(' ', '_')}_count"] = (
                 fh["Flag"] == flag
             ).sum()
 
@@ -727,7 +812,9 @@ def clean_qualifying_times(df: pd.DataFrame) -> pd.DataFrame:
                 else (
                     float(x.split(":")[0]) * 60 + float(x.split(":")[1])
                     if isinstance(x, str) and ":" in x
-                    else float(x) if isinstance(x, str) else x
+                    else float(x)
+                    if isinstance(x, str)
+                    else x
                 )
             )
         )

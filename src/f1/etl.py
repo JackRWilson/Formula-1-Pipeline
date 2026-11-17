@@ -1,48 +1,31 @@
-from sqlalchemy.engine import Connection
-from sqlalchemy import text
-
-if __package__:
-    from .extract import (
-        F1SITE_MANIFEST_TABLE,
-        FASTF1_SESSION_TABLE,
-        RAW_CONTAINER,
-        ExtractF1Site,
-        ExtractFastF1,
-        ExtractJolpiDrivers,
-        ExtractPhoton,
-        ExtractWikipedia,
-    )
-    from .transform import (
-        TransformCircuit,
-        TransformConstructor,
-        TransformDriver,
-        TransformLocation,
-        TransformRace,
-        TransformSeason,
-    )
-    from .utils import download_df_from_blob
-else:
-    from extract import (
-        F1SITE_MANIFEST_TABLE,
-        FASTF1_SESSION_TABLE,
-        RAW_CONTAINER,
-        ExtractF1Site,
-        ExtractFastF1,
-        ExtractJolpiDrivers,
-        ExtractPhoton,
-        ExtractWikipedia,
-    )
-    from transform import (
-        TransformCircuit,
-        TransformConstructor,
-        TransformDriver,
-        TransformLocation,
-        TransformRace,
-        TransformSeason,
-    )
-    from utils import download_df_from_blob
-
 import pandas as pd
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
+
+from f1.constants import (
+    F1SITE_MANIFEST_TABLE,
+    FASTF1_SESSION_TABLE,
+    MAX_ROUNDS_BLOB,
+    PHOTON_LOCATIONS_BLOB,
+    RAW_CONTAINER,
+    WIKIPEDIA_CIRCUITS_BLOB,
+)
+from f1.extract import (
+    ExtractF1Site,
+    ExtractFastF1,
+    ExtractJolpiDrivers,
+    ExtractPhoton,
+    ExtractWikipedia,
+)
+from f1.transform import (
+    TransformCircuit,
+    TransformConstructor,
+    TransformDriver,
+    TransformLocation,
+    TransformRace,
+    TransformSeason,
+)
+from f1.utils import download_df_from_blob
 
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 1000)
@@ -74,25 +57,33 @@ class ETLProcessor:
 
     def print_blob_heads(self) -> None:
         print("\nSample rows from each successful F1 session blob:")
-        sessions = self._conn.execute(text(f"""
+        sessions = (
+            self._conn.execute(
+                text(f"""
                 select distinct on (session_type)
                     session_type, blob_name
                 from {F1SITE_MANIFEST_TABLE}
                 where status = 'success' and blob_name is not null
                 order by session_type, year desc, round_number desc
-                """)).mappings().all()
+                """)
+            )
+            .mappings()
+            .all()
+        )
         if not sessions:
             print("No successful session blobs are available yet.")
         for session in sessions:
             self._print_blob_head(session["session_type"], session["blob_name"])
 
-        self._print_blob_head("max_rounds", "max_rounds.parquet")
-        self._print_blob_head("circuits", "circuits_raw.parquet")
-        self._print_blob_head("locations", "locations_raw.parquet")
+        self._print_blob_head("max_rounds", MAX_ROUNDS_BLOB)
+        self._print_blob_head("circuits", WIKIPEDIA_CIRCUITS_BLOB)
+        self._print_blob_head("locations", PHOTON_LOCATIONS_BLOB)
         self._print_fastf1_blob_heads()
 
     def _print_fastf1_blob_heads(self) -> None:
-        sessions = self._conn.execute(text(f"""
+        sessions = (
+            self._conn.execute(
+                text(f"""
                 select distinct on (s.session_name)
                     s.session_name, s.laps_blob_name, s.weather_blob_name,
                     s.messages_blob_name
@@ -100,7 +91,11 @@ class ETLProcessor:
                 where s.status = 'success'
                 order by s.session_name, s.season_year desc,
                     s.round_number desc, s.session_number desc
-                """)).mappings().all()
+                """)
+            )
+            .mappings()
+            .all()
+        )
         for session in sessions:
             for data_type in ("laps", "weather", "messages"):
                 blob_name = session[f"{data_type}_blob_name"]

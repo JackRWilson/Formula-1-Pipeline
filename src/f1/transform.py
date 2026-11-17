@@ -1,49 +1,34 @@
 import logging
 import re
 import unicodedata
-from pathlib import Path
 
 import pandas as pd
-from azure.storage.blob import ContainerClient
 from rapidfuzz import fuzz, process
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from f1.constants import (
+    CIRCUIT_FUZZY_SCORE_CUTOFF,
+    CIRCUIT_GENERIC_WORDS,
+    CURATED_CIRCUITS_PATH,
+    DATA_START_YEAR,
+    F1SITE_MANIFEST_TABLE,
+    MAX_ROUNDS_BLOB,
+    PHOTON_LOCATIONS_BLOB,
+    RAW_CONTAINER,
+    WIKIPEDIA_CIRCUITS_BLOB,
+)
+from f1.utils import (
+    clean_circuit_name,
+    constructor_mapping,
+    get_blob,
+    get_blob_container_client,
+    list_jolpi_driver_blobs,
+    list_session_blobs,
+    load_blobs,
+)
+
 logger = logging.getLogger(__name__)
-
-if __package__:
-    from .extract import (
-        DATA_START_YEAR,
-        F1SITE_MANIFEST_TABLE,
-        JOLPI_DRIVERS_BLOB_PREFIX,
-        MAX_ROUNDS_BLOB,
-        PHOTON_LOCATIONS_BLOB,
-        RAW_CONTAINER,
-        WIKIPEDIA_CIRCUITS_BLOB,
-    )
-    from .utils import (
-        clean_circuit_name,
-        constructor_mapping,
-        download_df_from_blob,
-        get_blob_container_client,
-    )
-else:
-    from extract import (
-        DATA_START_YEAR,
-        F1SITE_MANIFEST_TABLE,
-        JOLPI_DRIVERS_BLOB_PREFIX,
-        MAX_ROUNDS_BLOB,
-        PHOTON_LOCATIONS_BLOB,
-        RAW_CONTAINER,
-        WIKIPEDIA_CIRCUITS_BLOB,
-    )
-    from utils import (
-        clean_circuit_name,
-        constructor_mapping,
-        download_df_from_blob,
-        get_blob_container_client,
-    )
-
 
 LOCATION_COLUMNS = [
     "city",
@@ -52,114 +37,6 @@ LOCATION_COLUMNS = [
     "longitude",
     "elevation_m",
 ]
-CURATED_CIRCUITS_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "reference" / "curated_circuits.csv"
-)
-
-SESSIONS = [
-    "practice",
-    "qualifying",
-    "sprint-qualifying",
-    "race-result",
-    "sprint-result",
-]
-SESSION_BLOB_PATTERN = re.compile(
-    rf"^(?P<session>{'|'.join(SESSIONS)})"
-    r"/(?:(?P<session_number>\d+)/)?"
-    r"(?P<year>\d{4})/(?P<round>\d+)\.parquet$"
-)
-JOLPI_DRIVERS_PATTERN = re.compile(
-    rf"^{re.escape(JOLPI_DRIVERS_BLOB_PREFIX)}/(?P<year>\d{{4}})\.parquet$"
-)
-INT_GROUPS = ("year", "round")
-
-CIRCUIT_FUZZY_SCORE_CUTOFF = 90
-CIRCUIT_GENERIC_WORDS = {
-    "circuit",
-    "circuito",
-    "autodromo",
-    "autodrom",
-    "international",
-    "internacional",
-    "internazionale",
-    "grand",
-    "prix",
-    "street",
-    "track",
-    "racing",
-    "course",
-    "de",
-    "di",
-    "del",
-    "do",
-    "of",
-    "the",
-    "e",
-}
-
-
-def list_blobs_matching(
-    container_client: ContainerClient,
-    pattern: re.Pattern,
-    prefixes: list | None = None,
-    min_year: int | None = None,
-) -> pd.DataFrame:
-    rows = []
-    for prefix in prefixes or [None]:
-        for blob in container_client.list_blobs(name_starts_with=prefix):
-            m = pattern.match(blob.name)
-            if m is None:
-                continue
-            row = {"blob_name": blob.name, **m.groupdict()}
-            for key in INT_GROUPS:
-                if row.get(key) is not None:
-                    row[key] = int(row[key])
-            if (
-                min_year is not None
-                and row.get("year") is not None
-                and row["year"] < min_year
-            ):
-                continue
-            rows.append(row)
-
-    columns = ["blob_name", *pattern.groupindex]
-    return pd.DataFrame(rows, columns=columns)
-
-
-def get_blob(blob_name: str) -> pd.DataFrame:
-    data = download_df_from_blob(RAW_CONTAINER, blob_name)
-    if not isinstance(data, pd.DataFrame):
-        raise TypeError(f"Blob {blob_name!r} did not contain a DataFrame")
-    return data
-
-
-def load_blobs(blob_index: pd.DataFrame) -> pd.DataFrame:
-    frames = []
-    for row in blob_index.itertuples(index=False):
-        df = get_blob(row.blob_name)
-        meta = {k: v for k, v in row._asdict().items() if k != "blob_name"}
-        frames.append(df.assign(**meta))
-    if not frames:
-        raise ValueError("No blobs to load; check the pattern and prefixes")
-    return pd.concat(frames, ignore_index=True)
-
-
-def list_session_blobs(container_client: ContainerClient) -> pd.DataFrame:
-    return list_blobs_matching(
-        container_client,
-        SESSION_BLOB_PATTERN,
-        prefixes=[f"{session}/" for session in SESSIONS],
-        min_year=DATA_START_YEAR,
-    )
-
-
-def list_jolpi_driver_blobs(container_client: ContainerClient) -> pd.DataFrame:
-    return list_blobs_matching(
-        container_client,
-        JOLPI_DRIVERS_PATTERN,
-        prefixes=[f"{JOLPI_DRIVERS_BLOB_PREFIX}/"],
-        min_year=DATA_START_YEAR,
-    )
 
 
 def _require_columns(data: pd.DataFrame, columns: set, source: str) -> None:
@@ -828,3 +705,6 @@ class TransformRace:
         if pd.isna(city):
             return ""
         return self._strip_accents(str(city)).lower().strip()
+
+
+
