@@ -65,9 +65,6 @@ CIRCUIT_GENERIC_WORDS = {
     "e",
 }
 
-FASTEST_LAP_GROUP_COLS = ["season_year", "round_number", "session_name", "Driver"]
-FASTEST_LAP_KEEP_COLS = ["event_name", "Team", "LapTime", "LapNumber"]
-
 LAP_TIME_PATTERN = re.compile(
     r"^(?P<gap>\+)?(?:(?P<minutes>\d+):)?(?P<seconds>\d+)\.(?P<fraction>\d+)s?$"
 )
@@ -95,6 +92,9 @@ GRIDS = ["starting-grid", "sprint-grid"]
 GRID_BLOB_PATTERN = re.compile(
     rf"^(?P<session>{'|'.join(GRIDS)})"
     r"/(?P<year>\d{4})/(?P<round>\d+)\.parquet$"
+)
+FASTEST_LAP_BLOB_PATTERN = re.compile(
+    r"^(?P<session>fastest-laps)/(?P<year>\d{4})/(?P<round>\d+)\.parquet$"
 )
 JOLPI_DRIVERS_PATTERN = re.compile(
     rf"^{re.escape(JOLPI_DRIVERS_BLOB_PREFIX)}/(?P<year>\d{{4}})\.parquet$"

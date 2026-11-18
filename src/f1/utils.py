@@ -28,6 +28,7 @@ from sklearn.linear_model import LinearRegression
 
 from f1.constants import (
     DATA_START_YEAR,
+    FASTEST_LAP_BLOB_PATTERN,
     FASTF1_BLOB_PATTERN,
     GRID_BLOB_PATTERN,
     GRIDS,
@@ -555,6 +556,13 @@ def list_grid_blobs(container_client: ContainerClient) -> pd.DataFrame:
         min_year=DATA_START_YEAR,
     )
 
+def list_fastest_lap_blobs(container_client: ContainerClient) -> pd.DataFrame:
+    return list_blobs_matching(
+        container_client,
+        FASTEST_LAP_BLOB_PATTERN,
+        prefixes=["fastest-laps/"],
+        min_year=DATA_START_YEAR,
+    )
 
 def list_jolpi_driver_blobs(container_client: ContainerClient) -> pd.DataFrame:
     return list_blobs_matching(

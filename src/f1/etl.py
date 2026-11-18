@@ -52,11 +52,11 @@ class ETLProcessor:
         # constructor_df = TransformConstructor().transform()
         # driver_df = TransformDriver().transform()
         # race_df = TransformRace().transform(circuit_df)
-        # race_result_df = TransformRaceResult().transform()
-        practice_result_df = TransformPracticeResult().transform()
+        race_result_df = TransformRaceResult().transform()
+        # practice_result_df = TransformPracticeResult().transform()
         # print(location_df)
-        print(practice_result_df)
-        practice_result_df.to_csv("test.csv", index=False)
+        print(race_result_df)
+        race_result_df.to_csv("test.csv", index=False)
 
         print("ETL complete")
 

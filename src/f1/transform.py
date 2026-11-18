@@ -13,8 +13,6 @@ from f1.constants import (
     CURATED_CIRCUITS_PATH,
     DATA_START_YEAR,
     F1SITE_MANIFEST_TABLE,
-    FASTEST_LAP_GROUP_COLS,
-    FASTEST_LAP_KEEP_COLS,
     LAP_TIME_PATTERN,
     MAX_ROUNDS_BLOB,
     PHOTON_LOCATIONS_BLOB,
@@ -27,7 +25,7 @@ from f1.utils import (
     constructor_mapping,
     get_blob,
     get_blob_container_client,
-    list_fastf1_blobs,
+    list_fastest_lap_blobs,
     list_grid_blobs,
     list_jolpi_driver_blobs,
     list_session_blobs,
@@ -717,14 +715,12 @@ class TransformRaceResult:
     def transform(self) -> pd.DataFrame:
         results_df = self._extract_race_results()
         grid_df = self._extract_starting_grid()
-        fastest_df = self._extract_race_laps()
+        fastest_df = self._extract_fastest_laps()
 
-        results_df, grid_df, fastest_df = self._consolidate_columns(
-            results_df, grid_df, fastest_df
-        )
+        results_df, grid_df = self._consolidate_columns(results_df, grid_df)
         results_df = self._join_starting_grid(results_df, grid_df)
         results_df = self._classify_end_position(results_df)
-        results_df, fastest_df = self._normalize_team_names(results_df, fastest_df)
+        results_df = self._normalize_team_names(results_df)
         results_df = self._join_fastest_laps(results_df, fastest_df)
 
         return results_df
@@ -775,21 +771,30 @@ class TransformRaceResult:
             add_round=True,
         )
 
-    def _extract_race_laps(self) -> pd.DataFrame:
+    def _extract_fastest_laps(self) -> pd.DataFrame:
         blob_index = self._filter_blob_index(
-            list_fastf1_blobs, session="race", kind="laps"
+            list_fastest_lap_blobs, session="fastest-laps"
         )
-        return self._concat_blob_frames(
+        df = self._concat_blob_frames(
             blob_index,
-            {"season_year", "round_number", "Driver", "Team"},
-            transform=self._find_fastest_laps,
+            {"race_id", "fastest_lap_time", "lap_number", "driver_code", "driver_name"},
         )
+        df["fastest_lap_seconds"] = self._parse_lap_strings(df["fastest_lap_time"])[
+            "seconds"
+        ]
+        df["fastest_lap_number"] = pd.to_numeric(df["lap_number"]).astype("Int64")
+        return df[
+            [
+                "race_id",
+                "driver_name",
+                "driver_code",
+                "fastest_lap_seconds",
+                "fastest_lap_number",
+            ]
+        ]
 
     def _consolidate_columns(
-        self,
-        results_df: pd.DataFrame,
-        grid_df: pd.DataFrame,
-        fastest_df: pd.DataFrame,
+        self, results_df: pd.DataFrame, grid_df: pd.DataFrame
     ) -> pd.DataFrame:
         results_df = results_df[
             [
@@ -811,19 +816,7 @@ class TransformRaceResult:
         grid_df = grid_df.drop(columns=["session_type"])
         grid_df = grid_df.rename(columns={"team_name": "constructor_name"})
 
-        fastest_df = fastest_df.drop(columns=["session_name", "event_name"])
-        fastest_df = fastest_df.rename(
-            columns={
-                "season_year": "year",
-                "round_number": "round",
-                "Driver": "driver_code",
-                "Team": "constructor_name",
-                "LapTime": "fastest_lap_seconds",
-                "LapNumber": "fastest_lap_number",
-            }
-        )
-
-        return results_df, grid_df, fastest_df
+        return results_df, grid_df
 
     def _join_starting_grid(
         self, results_df: pd.DataFrame, grid_df: pd.DataFrame
@@ -849,29 +842,20 @@ class TransformRaceResult:
         return df
 
     @staticmethod
-    def _find_fastest_laps(
-        laps: pd.DataFrame,
-        group_cols: list = FASTEST_LAP_GROUP_COLS,
-        keep_cols: list = FASTEST_LAP_KEEP_COLS,
-        exclude_deleted: bool = False,
-    ) -> pd.DataFrame:
-        lap_time = laps["LapTime"]
-        if exclude_deleted:
-            lap_time = lap_time.mask(laps["Deleted"].fillna(False).astype(bool))
-
-        fastest = (
-            laps.assign(LapTime=lap_time)
-            .sort_values("LapTime", na_position="last", kind="stable")
-            .drop_duplicates(group_cols, keep="first")[group_cols + keep_cols]
-            .sort_values(group_cols[:-1] + ["LapTime"], na_position="last")
-            .reset_index(drop=True)
+    def _parse_lap_strings(raw: pd.Series) -> pd.DataFrame:
+        parts = raw.astype("string").str.strip().str.extract(LAP_TIME_PATTERN)
+        minutes = pd.to_numeric(parts["minutes"]).astype("float64")
+        seconds = pd.to_numeric(parts["seconds"]).astype("float64")
+        fraction = pd.to_numeric("0." + parts["fraction"]).astype("float64")
+        return pd.DataFrame(
+            {
+                "is_gap": parts["gap"].notna(),
+                "seconds": minutes.fillna(0) * 60 + seconds + fraction,
+            },
+            index=raw.index,
         )
-        fastest["LapNumber"] = fastest["LapNumber"].astype("Int64")
-        return fastest
 
-    def _normalize_team_names(
-        self, result_df: pd.DataFrame, fastest_df: pd.DataFrame
-    ) -> pd.DataFrame:
+    def _normalize_team_names(self, result_df: pd.DataFrame) -> pd.DataFrame:
         team_aliases = {
             _normalize_text(alias).casefold(): name
             for alias, name in constructor_mapping["team_name"].items()
@@ -879,16 +863,13 @@ class TransformRaceResult:
         result_df["constructor_name"] = result_df["constructor_name"].map(
             lambda name: team_aliases.get(name.casefold(), name)
         )
-        fastest_df["constructor_name"] = fastest_df["constructor_name"].map(
-            lambda name: team_aliases.get(name.casefold(), name)
-        )
-        return result_df, fastest_df
+        return result_df
 
     def _join_fastest_laps(
         self, results_df: pd.DataFrame, fastest_df: pd.DataFrame
     ) -> pd.DataFrame:
         return results_df.merge(
-            fastest_df, on=["year", "round", "driver_code", "constructor_name"]
+            fastest_df, on=["race_id", "driver_name", "driver_code"]
         )
 
 
@@ -969,15 +950,17 @@ class TransformPracticeResult:
 
         absolute = parsed["seconds"].where(~parsed["is_gap"])
         base = absolute.groupby([df[k] for k in keys]).transform("min")
-        df["lap_seconds"] = parsed["seconds"].where(
-            ~parsed["is_gap"], base + parsed["seconds"]
-        ).round(3)
+        df["lap_seconds"] = (
+            parsed["seconds"]
+            .where(~parsed["is_gap"], base + parsed["seconds"])
+            .round(3)
+        )
 
         base_counts = absolute.notna().groupby([df[k] for k in keys]).sum()
         bad = base_counts[base_counts != 1]
         if not bad.empty:
             raise ValueError(f"Sessions without exactly one base time:\n{bad}")
-        
+
         df["session_type"] = df["session_type"].map(SESSION_MAP)
         df = df.rename(columns={"lap_seconds": "best_lap_seconds"})
         return df.drop(columns=["lap_time", "round"])
