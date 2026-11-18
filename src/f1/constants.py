@@ -65,6 +65,9 @@ CIRCUIT_GENERIC_WORDS = {
     "e",
 }
 
+FASTEST_LAP_GROUP_COLS = ["season_year", "round_number", "session_name", "Driver"]
+FASTEST_LAP_KEEP_COLS = ["event_name", "Team", "LapTime", "LapNumber"]
+
 # Blob layouts used by the shared blob-index helpers in utils.py.
 SESSIONS = [
     "practice",
@@ -77,6 +80,11 @@ SESSION_BLOB_PATTERN = re.compile(
     rf"^(?P<session>{'|'.join(SESSIONS)})"
     r"/(?:(?P<session_number>\d+)/)?"
     r"(?P<year>\d{4})/(?P<round>\d+)\.parquet$"
+)
+GRIDS = ["starting-grid", "sprint-grid"]
+GRID_BLOB_PATTERN = re.compile(
+    rf"^(?P<session>{'|'.join(GRIDS)})"
+    r"/(?P<year>\d{4})/(?P<round>\d+)\.parquet$"
 )
 JOLPI_DRIVERS_PATTERN = re.compile(
     rf"^{re.escape(JOLPI_DRIVERS_BLOB_PREFIX)}/(?P<year>\d{{4}})\.parquet$"
@@ -95,7 +103,7 @@ FASTF1_KINDS = ["laps", "weather", "messages"]
 FASTF1_BLOB_PATTERN = re.compile(
     r"^fastf1/"
     r"(?P<year>\d{4})/"
-    r"(?P<round>\d+)-(?P<event_slug>[^/]+)/"
+    r"(?P<round>\d+)-(?P<grand_prix>[^/]+)/"
     rf"(?P<session>{'|'.join(map(re.escape, FASTF1_SESSIONS))})"
     rf"_(?P<kind>{'|'.join(FASTF1_KINDS)})"
     r"\.parquet$"

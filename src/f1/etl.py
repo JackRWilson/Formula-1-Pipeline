@@ -24,6 +24,7 @@ from f1.transform import (
     TransformLocation,
     TransformRace,
     TransformSeason,
+    TransformRaceResult
 )
 from f1.utils import download_df_from_blob
 
@@ -37,7 +38,7 @@ class ETLProcessor:
 
     def process(self) -> None:
         print("ETL started")
-        ExtractF1Site(self._conn).extract()
+        # ExtractF1Site(self._conn).extract()
         # circuits = ExtractWikipedia().extract()
         # ExtractPhoton().extract(circuits)
         # ExtractFastF1(self._conn).extract()
@@ -45,13 +46,15 @@ class ETLProcessor:
         # self.print_blob_heads()
 
         # season_df = TransformSeason(self._conn).transform()
-        circuit_df = TransformCircuit().transform()
+        # circuit_df = TransformCircuit().transform()
         # location_df = TransformLocation().transform(circuit_df)
         # constructor_df = TransformConstructor().transform()
         # driver_df = TransformDriver().transform()
-        race_df = TransformRace().transform(circuit_df)
+        # race_df = TransformRace().transform(circuit_df)
+        race_result_df = TransformRaceResult().transform()
         # print(location_df)
-        print(race_df)
+        print(race_result_df)
+        race_result_df.to_csv("test.csv", index=False)
 
         print("ETL complete")
 

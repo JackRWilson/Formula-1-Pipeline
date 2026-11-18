@@ -13,6 +13,8 @@ from f1.constants import (
     CURATED_CIRCUITS_PATH,
     DATA_START_YEAR,
     F1SITE_MANIFEST_TABLE,
+    FASTEST_LAP_GROUP_COLS,
+    FASTEST_LAP_KEEP_COLS,
     MAX_ROUNDS_BLOB,
     PHOTON_LOCATIONS_BLOB,
     RAW_CONTAINER,
@@ -23,6 +25,8 @@ from f1.utils import (
     constructor_mapping,
     get_blob,
     get_blob_container_client,
+    list_fastf1_blobs,
+    list_grid_blobs,
     list_jolpi_driver_blobs,
     list_session_blobs,
     load_blobs,
@@ -274,7 +278,7 @@ class TransformConstructor:
         teams = self._extract_teams()
         team_aliases = {
             _normalize_text(alias).casefold(): name
-            for alias, name in constructor_mapping["team_id"].items()
+            for alias, name in constructor_mapping["team_name"].items()
         }
         teams["constructor_name"] = teams["constructor_name"].map(
             lambda name: team_aliases.get(name.casefold(), name)
@@ -298,9 +302,9 @@ class TransformConstructor:
         team_names = set()
         for row in race_results.itertuples():
             df = get_blob(row.blob_name)
-            _require_columns(df, {"team_id"}, row.blob_name)
+            _require_columns(df, {"team_name"}, row.blob_name)
             team_names.update(
-                name for name in df["team_id"].map(_normalize_text).dropna().unique()
+                name for name in df["team_name"].map(_normalize_text).dropna().unique()
             )
         if not team_names:
             raise ValueError("Race-result blobs contained no constructor names")
@@ -546,9 +550,9 @@ class TransformRace:
         )
 
     def _standardize_circuit_names(
-        self, races_df: pd.DataFrame, df_circuit: pd.DataFrame
+        self, races_df: pd.DataFrame, circuit_df: pd.DataFrame
     ) -> pd.DataFrame:
-        circuit_name_map = self._build_circuit_name_map(races_df, df_circuit)
+        circuit_name_map = self._build_circuit_name_map(races_df, circuit_df)
 
         races_df["circuit_name"] = (
             races_df["circuit_name"]
@@ -558,9 +562,9 @@ class TransformRace:
         return races_df
 
     def _build_circuit_name_map(
-        self, races_df: pd.DataFrame, df_circuit: pd.DataFrame
+        self, races_df: pd.DataFrame, circuit_df: pd.DataFrame
     ) -> dict:
-        df_circuit_keyed = self._add_circuit_match_keys(df_circuit)
+        circuit_df_keyed = self._add_circuit_match_keys(circuit_df)
 
         raw_names = races_df["circuit_name"].dropna().unique().tolist()
         circuit_name_map = {}
@@ -568,13 +572,13 @@ class TransformRace:
 
         # Exact match on normalized key
         self._match_circuit_names_by_exact_key(
-            raw_names, df_circuit_keyed, circuit_name_map, claimed_circuit_keys
+            raw_names, circuit_df_keyed, circuit_name_map, claimed_circuit_keys
         )
 
         # Fuzzy match, leftovers only
         unresolved_names = [n for n in raw_names if n not in circuit_name_map]
         self._match_circuit_names_by_fuzzy_key(
-            unresolved_names, df_circuit_keyed, circuit_name_map, claimed_circuit_keys
+            unresolved_names, circuit_df_keyed, circuit_name_map, claimed_circuit_keys
         )
 
         # City fallback, leftovers only
@@ -582,7 +586,7 @@ class TransformRace:
         self._match_circuit_names_by_city(
             unresolved_names,
             races_df,
-            df_circuit_keyed,
+            circuit_df_keyed,
             circuit_name_map,
             claimed_circuit_keys,
         )
@@ -593,30 +597,30 @@ class TransformRace:
 
         return circuit_name_map
 
-    def _add_circuit_match_keys(self, df_circuit: pd.DataFrame) -> pd.DataFrame:
-        df_circuit_keyed = df_circuit.copy()
-        df_circuit_keyed["circuit_key"] = df_circuit_keyed["circuit_name"].map(
+    def _add_circuit_match_keys(self, circuit_df: pd.DataFrame) -> pd.DataFrame:
+        circuit_df_keyed = circuit_df.copy()
+        circuit_df_keyed["circuit_key"] = circuit_df_keyed["circuit_name"].map(
             self._normalize_circuit_name
         )
-        df_circuit_keyed["city_key"] = df_circuit_keyed["location_city"].map(
+        circuit_df_keyed["city_key"] = circuit_df_keyed["location_city"].map(
             self._normalize_city
         )
 
-        duplicated_keys = df_circuit_keyed[
-            df_circuit_keyed["circuit_key"].duplicated(keep=False)
+        duplicated_keys = circuit_df_keyed[
+            circuit_df_keyed["circuit_key"].duplicated(keep=False)
         ]
         if not duplicated_keys.empty:
             raise ValueError(
                 "Circuit names collapse to the same key; adjust CIRCUIT_GENERIC_WORDS:\n"
                 f"{duplicated_keys[['circuit_name', 'circuit_key']]}"
             )
-        return df_circuit_keyed
+        return circuit_df_keyed
 
     def _match_circuit_names_by_exact_key(
-        self, raw_names, df_circuit_keyed, circuit_name_map, claimed_circuit_keys
+        self, raw_names, circuit_df_keyed, circuit_name_map, claimed_circuit_keys
     ) -> None:
         canonical_name_by_key = dict(
-            zip(df_circuit_keyed["circuit_key"], df_circuit_keyed["circuit_name"])
+            zip(circuit_df_keyed["circuit_key"], circuit_df_keyed["circuit_name"])
         )
         for raw_name in raw_names:
             circuit_key = self._normalize_circuit_name(raw_name)
@@ -625,10 +629,10 @@ class TransformRace:
                 claimed_circuit_keys.add(circuit_key)
 
     def _match_circuit_names_by_fuzzy_key(
-        self, unresolved_names, df_circuit_keyed, circuit_name_map, claimed_circuit_keys
+        self, unresolved_names, circuit_df_keyed, circuit_name_map, claimed_circuit_keys
     ) -> None:
         canonical_name_by_key = dict(
-            zip(df_circuit_keyed["circuit_key"], df_circuit_keyed["circuit_name"])
+            zip(circuit_df_keyed["circuit_key"], circuit_df_keyed["circuit_name"])
         )
         unclaimed_circuit_keys = set(canonical_name_by_key) - claimed_circuit_keys
 
@@ -658,15 +662,15 @@ class TransformRace:
         self,
         unresolved_names,
         races_df,
-        df_circuit_keyed,
+        circuit_df_keyed,
         circuit_name_map,
         claimed_circuit_keys,
     ) -> None:
         if not unresolved_names:
             return
 
-        df_unclaimed_circuits = df_circuit_keyed[
-            ~df_circuit_keyed["circuit_key"].isin(claimed_circuit_keys)
+        df_unclaimed_circuits = circuit_df_keyed[
+            ~circuit_df_keyed["circuit_key"].isin(claimed_circuit_keys)
         ]
         unclaimed_names_by_city_key = df_unclaimed_circuits.groupby("city_key")[
             "circuit_name"
@@ -707,4 +711,180 @@ class TransformRace:
         return self._strip_accents(str(city)).lower().strip()
 
 
+class TransformRaceResult:
+    def transform(self) -> pd.DataFrame:
+        results_df = self._extract_race_results()
+        grid_df = self._extract_starting_grid()
+        fastest_df = self._extract_race_laps()
 
+        results_df, grid_df, fastest_df = self._consolidate_columns(
+            results_df, grid_df, fastest_df
+        )
+        results_df = self._join_starting_grid(results_df, grid_df)
+        results_df = self._classify_end_position(results_df)
+        results_df, fastest_df = self._normalize_team_name(results_df, fastest_df)
+        results_df = self._join_fastest_laps(results_df, fastest_df)
+
+        return results_df
+
+    def _filter_blob_index(self, list_blobs, **filters) -> pd.DataFrame:
+        container = get_blob_container_client(RAW_CONTAINER)
+        blob_index = list_blobs(container)
+
+        mask = pd.Series(True, index=blob_index.index)
+        for column, value in filters.items():
+            mask &= blob_index[column] == value
+
+        results = blob_index[mask]
+        if results.empty:
+            described = ", ".join(f"{k}={v}" for k, v in filters.items())
+            raise ValueError(f"No F1 blobs found for {described}")
+        return results
+
+    def _concat_blob_frames(
+        self,
+        blob_index: pd.DataFrame,
+        required_columns: set,
+        transform=None,
+        add_round: bool = False,
+    ) -> pd.DataFrame:
+        frames = []
+        for row in blob_index.itertuples():
+            df = get_blob(row.blob_name)
+            if add_round:
+                df["round"] = row.round
+            if transform is not None:
+                df = transform(df)
+            _require_columns(df, required_columns, row.blob_name)
+            frames.append(df)
+        return pd.concat(frames, ignore_index=True).drop_duplicates()
+
+    def _extract_race_results(self) -> pd.DataFrame:
+        blob_index = self._filter_blob_index(list_session_blobs, session="race-result")
+        return self._concat_blob_frames(
+            blob_index, {"race_id", "year", "round", "driver_code"}, add_round=True
+        )
+
+    def _extract_starting_grid(self) -> pd.DataFrame:
+        blob_index = self._filter_blob_index(list_grid_blobs, session="starting-grid")
+        return self._concat_blob_frames(
+            blob_index,
+            {"race_id", "driver_name", "round", "driver_code", "team_name"},
+            add_round=True,
+        )
+
+    def _extract_race_laps(self) -> pd.DataFrame:
+        blob_index = self._filter_blob_index(
+            list_fastf1_blobs, session="race", kind="laps"
+        )
+        return self._concat_blob_frames(
+            blob_index,
+            {"season_year", "round_number", "Driver", "Team"},
+            transform=self._find_fastest_laps,
+        )
+
+    def _consolidate_columns(
+        self,
+        results_df: pd.DataFrame,
+        grid_df: pd.DataFrame,
+        fastest_df: pd.DataFrame,
+    ) -> pd.DataFrame:
+        results_df = results_df[
+            [
+                "race_id",
+                "year",
+                "round",
+                "driver_name",
+                "driver_code",
+                "team_name",
+                "end_position",
+                "points",
+                "laps_completed",
+            ]
+        ]
+        results_df = results_df.rename(
+            columns={"end_position": "finish_position", "team_name": "constructor_name"}
+        )
+
+        grid_df = grid_df.drop(columns=["session_type"])
+        grid_df = grid_df.rename(columns={"team_name": "constructor_name"})
+
+        fastest_df = fastest_df.drop(columns=["session_name", "event_name"])
+        fastest_df = fastest_df.rename(
+            columns={
+                "season_year": "year",
+                "round_number": "round",
+                "Driver": "driver_code",
+                "Team": "constructor_name",
+                "LapTime": "fastest_lap_seconds",
+                "LapNumber": "fastest_lap_number",
+            }
+        )
+
+        return results_df, grid_df, fastest_df
+
+    def _join_starting_grid(
+        self, results_df: pd.DataFrame, grid_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        return results_df.merge(
+            grid_df,
+            on=["race_id", "round", "driver_name", "driver_code", "constructor_name"],
+            how="left",
+        )
+
+    @staticmethod
+    def _classify_end_position(results_df: pd.DataFrame) -> pd.DataFrame:
+        df = results_df.copy()
+        raw = df["finish_position"].astype("string").str.strip().str.upper()
+        numeric = pd.to_numeric(raw, errors="coerce")
+
+        status = pd.Series("DNF", index=df.index, dtype="string")
+        status.loc[raw.isin(["NC", "DQ"])] = raw
+        status.loc[numeric.notna()] = "CLAS"
+
+        df["finish_position"] = numeric.astype("Int64")
+        df["result_status"] = status
+        return df
+
+    @staticmethod
+    def _find_fastest_laps(
+        laps: pd.DataFrame,
+        group_cols: list = FASTEST_LAP_GROUP_COLS,
+        keep_cols: list = FASTEST_LAP_KEEP_COLS,
+        exclude_deleted: bool = False,
+    ) -> pd.DataFrame:
+        lap_time = laps["LapTime"]
+        if exclude_deleted:
+            lap_time = lap_time.mask(laps["Deleted"].fillna(False).astype(bool))
+
+        fastest = (
+            laps.assign(LapTime=lap_time)
+            .sort_values("LapTime", na_position="last", kind="stable")
+            .drop_duplicates(group_cols, keep="first")[group_cols + keep_cols]
+            .sort_values(group_cols[:-1] + ["LapTime"], na_position="last")
+            .reset_index(drop=True)
+        )
+        fastest["LapNumber"] = fastest["LapNumber"].astype("Int64")
+        return fastest
+
+    def _normalize_team_name(
+        self, result_df: pd.DataFrame, fastest_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        team_aliases = {
+            _normalize_text(alias).casefold(): name
+            for alias, name in constructor_mapping["team_name"].items()
+        }
+        result_df["constructor_name"] = result_df["constructor_name"].map(
+            lambda name: team_aliases.get(name.casefold(), name)
+        )
+        fastest_df["constructor_name"] = fastest_df["constructor_name"].map(
+            lambda name: team_aliases.get(name.casefold(), name)
+        )
+        return result_df, fastest_df
+
+    def _join_fastest_laps(
+        self, results_df: pd.DataFrame, fastest_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        return results_df.merge(
+            fastest_df, on=["year", "round", "driver_code", "constructor_name"]
+        )

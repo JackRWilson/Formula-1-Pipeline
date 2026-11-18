@@ -29,6 +29,8 @@ from sklearn.linear_model import LinearRegression
 from f1.constants import (
     DATA_START_YEAR,
     FASTF1_BLOB_PATTERN,
+    GRID_BLOB_PATTERN,
+    GRIDS,
     INT_GROUPS,
     JOLPI_DRIVERS_BLOB_PREFIX,
     JOLPI_DRIVERS_PATTERN,
@@ -545,6 +547,14 @@ def list_session_blobs(container_client: ContainerClient) -> pd.DataFrame:
         min_year=DATA_START_YEAR,
     )
 
+def list_grid_blobs(container_client: ContainerClient) -> pd.DataFrame:
+    return list_blobs_matching(
+        container_client,
+        GRID_BLOB_PATTERN,
+        prefixes=[f"{grid}/" for grid in GRIDS],
+        min_year=DATA_START_YEAR,
+    )
+
 
 def list_jolpi_driver_blobs(container_client: ContainerClient) -> pd.DataFrame:
     return list_blobs_matching(
@@ -947,7 +957,7 @@ def clean_circuit_name(name: str) -> str:
 
 
 constructor_mapping = {
-    "team_id": {
+    "team_name": {
         # Red Bull
         "Red Bull Racing Renault": "Red Bull",
         "Red Bull Renault": "Red Bull",
