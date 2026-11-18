@@ -418,6 +418,33 @@ class ExtractF1Site:
         return data
 
     @staticmethod
+    def _expand_race_url_to_session_urls(race_url: str, year: int) -> list[dict]:
+        base_url = race_url.rsplit("/", 1)[0]
+        session_types = [
+            session_type
+            for session_type, first_year in SESSION_SUFFIXES_BY_SESSION_TYPE.items()
+            if year >= first_year
+        ]
+        if year >= DATA_START_YEAR:
+            if year == 2020 and "/emilia-romagna/" in race_url:
+                session_types.append("practice/0")
+            else:
+                session_types.extend(("practice/1", "practice/2", "practice/3"))
+            session_types.extend(("qualifying", "starting-grid", "fastest-laps"))
+        if year >= SPRINT_START_YEAR:
+            session_types.extend(SPRINT_SESSION_TYPES)
+
+        sessions = [
+            {
+                "url": f"{base_url}/{session_type}",
+                "year": year,
+                "session_type": session_type,
+            }
+            for session_type in session_types
+        ]
+        return sessions
+
+    @staticmethod
     def _page_has_result_rows(browser: WebDriver) -> bool:
         for table in browser.find_elements(By.TAG_NAME, "table"):
             for row in table.find_elements(By.TAG_NAME, "tr")[1:]:
@@ -474,7 +501,8 @@ class ExtractF1Site:
 
                     try:
                         card = item.find_element(
-                            By.XPATH, "./ancestor::div[contains(@class, 'flex-col')]"
+                            By.XPATH,
+                            "./ancestor::div[count(.//*[contains(text(), 'ROUND ')]) = 1][last()]",
                         )
                         if "CALLED OFF" in card.text.upper():
                             continue
@@ -643,33 +671,6 @@ class ExtractFastF1:
                     }
                 )
         return event_records, session_records
-
-    @staticmethod
-    def _expand_race_url_to_session_urls(race_url: str, year: int) -> list[dict]:
-        base_url = race_url.rsplit("/", 1)[0]
-        session_types = [
-            session_type
-            for session_type, first_year in SESSION_SUFFIXES_BY_SESSION_TYPE.items()
-            if year >= first_year
-        ]
-        if year >= DATA_START_YEAR:
-            if year == 2020 and "/emilia-romagna/" in race_url:
-                session_types.append("practice/0")
-            else:
-                session_types.extend(("practice/1", "practice/2", "practice/3"))
-            session_types.extend(("qualifying", "starting-grid", "fastest-laps"))
-        if year >= SPRINT_START_YEAR:
-            session_types.extend(SPRINT_SESSION_TYPES)
-
-        sessions = [
-            {
-                "url": f"{base_url}/{session_type}",
-                "year": year,
-                "session_type": session_type,
-            }
-            for session_type in session_types
-        ]
-        return sessions
 
     @staticmethod
     def _is_missing(value: object) -> bool:
