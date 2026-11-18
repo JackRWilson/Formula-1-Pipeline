@@ -68,6 +68,16 @@ CIRCUIT_GENERIC_WORDS = {
 FASTEST_LAP_GROUP_COLS = ["season_year", "round_number", "session_name", "Driver"]
 FASTEST_LAP_KEEP_COLS = ["event_name", "Team", "LapTime", "LapNumber"]
 
+LAP_TIME_PATTERN = re.compile(
+    r"^(?P<gap>\+)?(?:(?P<minutes>\d+):)?(?P<seconds>\d+)\.(?P<fraction>\d+)s?$"
+)
+SESSION_MAP = {
+    "practice/0": "FP3",
+    "practice/1": "FP1",
+    "practice/2": "FP2",
+    "practice/3": "FP3",
+}
+
 # Blob layouts used by the shared blob-index helpers in utils.py.
 SESSIONS = [
     "practice",

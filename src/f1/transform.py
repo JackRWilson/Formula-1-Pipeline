@@ -15,9 +15,11 @@ from f1.constants import (
     F1SITE_MANIFEST_TABLE,
     FASTEST_LAP_GROUP_COLS,
     FASTEST_LAP_KEEP_COLS,
+    LAP_TIME_PATTERN,
     MAX_ROUNDS_BLOB,
     PHOTON_LOCATIONS_BLOB,
     RAW_CONTAINER,
+    SESSION_MAP,
     WIKIPEDIA_CIRCUITS_BLOB,
 )
 from f1.utils import (
@@ -722,7 +724,7 @@ class TransformRaceResult:
         )
         results_df = self._join_starting_grid(results_df, grid_df)
         results_df = self._classify_end_position(results_df)
-        results_df, fastest_df = self._normalize_team_name(results_df, fastest_df)
+        results_df, fastest_df = self._normalize_team_names(results_df, fastest_df)
         results_df = self._join_fastest_laps(results_df, fastest_df)
 
         return results_df
@@ -867,7 +869,7 @@ class TransformRaceResult:
         fastest["LapNumber"] = fastest["LapNumber"].astype("Int64")
         return fastest
 
-    def _normalize_team_name(
+    def _normalize_team_names(
         self, result_df: pd.DataFrame, fastest_df: pd.DataFrame
     ) -> pd.DataFrame:
         team_aliases = {
@@ -888,3 +890,110 @@ class TransformRaceResult:
         return results_df.merge(
             fastest_df, on=["year", "round", "driver_code", "constructor_name"]
         )
+
+
+class TransformPracticeResult:
+    def transform(self) -> pd.DataFrame:
+        practice_df = self._extract_practice_results()
+        practice_df = self._best_practice_laps(practice_df)
+        practice_df = self._rename_columns(practice_df)
+        practice_df = self._normalize_team_names(practice_df)
+        return practice_df
+
+    def _filter_blob_index(self, list_blobs, **filters) -> pd.DataFrame:
+        container = get_blob_container_client(RAW_CONTAINER)
+        blob_index = list_blobs(container)
+
+        mask = pd.Series(True, index=blob_index.index)
+        for column, value in filters.items():
+            mask &= blob_index[column] == value
+
+        results = blob_index[mask]
+        if results.empty:
+            described = ", ".join(f"{k}={v}" for k, v in filters.items())
+            raise ValueError(f"No F1 blobs found for {described}")
+        return results
+
+    def _concat_blob_frames(
+        self,
+        blob_index: pd.DataFrame,
+        required_columns: set,
+        transform=None,
+        add_round: bool = False,
+    ) -> pd.DataFrame:
+        frames = []
+        for row in blob_index.itertuples():
+            df = get_blob(row.blob_name)
+            if add_round:
+                df["round"] = row.round
+            if transform is not None:
+                df = transform(df)
+            _require_columns(df, required_columns, row.blob_name)
+            frames.append(df)
+        return pd.concat(frames, ignore_index=True).drop_duplicates()
+
+    def _extract_practice_results(self) -> pd.DataFrame:
+        blob_index = self._filter_blob_index(list_session_blobs, session="practice")
+        return self._concat_blob_frames(
+            blob_index,
+            {
+                "race_id",
+                "driver_name",
+                "team_name",
+                "lap_time",
+                "session_type",
+                "round",
+                "driver_code",
+            },
+            add_round=True,
+        )
+
+    @staticmethod
+    def _parse_lap_strings(raw: pd.Series) -> pd.DataFrame:
+        parts = raw.astype("string").str.strip().str.extract(LAP_TIME_PATTERN)
+        minutes = pd.to_numeric(parts["minutes"]).astype("float64")
+        seconds = pd.to_numeric(parts["seconds"]).astype("float64")
+        fraction = pd.to_numeric("0." + parts["fraction"]).astype("float64")
+        return pd.DataFrame(
+            {
+                "is_gap": parts["gap"].notna(),
+                "seconds": minutes.fillna(0) * 60 + seconds + fraction,
+            },
+            index=raw.index,
+        )
+
+    def _best_practice_laps(self, practice_df: pd.DataFrame) -> pd.DataFrame:
+        df = practice_df.copy()
+        parsed = self._parse_lap_strings(df["lap_time"])
+        keys = ["race_id", "session_type"]
+
+        absolute = parsed["seconds"].where(~parsed["is_gap"])
+        base = absolute.groupby([df[k] for k in keys]).transform("min")
+        df["lap_seconds"] = parsed["seconds"].where(
+            ~parsed["is_gap"], base + parsed["seconds"]
+        ).round(3)
+
+        base_counts = absolute.notna().groupby([df[k] for k in keys]).sum()
+        bad = base_counts[base_counts != 1]
+        if not bad.empty:
+            raise ValueError(f"Sessions without exactly one base time:\n{bad}")
+        
+        df["session_type"] = df["session_type"].map(SESSION_MAP)
+        df = df.rename(columns={"lap_seconds": "best_lap_seconds"})
+        return df.drop(columns=["lap_time", "round"])
+
+    def _rename_columns(self, practice_df: pd.DataFrame) -> pd.DataFrame:
+        df = practice_df.rename(
+            columns={"team_name": "constructor_name", "position": "session_position"}
+        )
+        return df
+
+    def _normalize_team_names(self, practice_df: pd.DataFrame) -> pd.DataFrame:
+        team_aliases = {
+            _normalize_text(alias).casefold(): name
+            for alias, name in constructor_mapping["team_name"].items()
+        }
+        practice_df["constructor_name"] = practice_df["constructor_name"].map(
+            lambda name: team_aliases.get(name.casefold(), name)
+        )
+        return practice_df
