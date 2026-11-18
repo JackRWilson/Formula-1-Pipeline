@@ -5,6 +5,7 @@ __pycache__/
 # Local secrets
 .env
 /docs/dev/
+/src/f1.egg-info
 
 # Logs and run state
 docs/logs.txt
@@ -28,3 +29,4 @@ notebooks/testing.ipynb
 src/f1/predictions/model_pre_qual.cbm
 src/f1/predictions/model_pre_race.cbm
 artifacts/
+
