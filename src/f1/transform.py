@@ -2,6 +2,7 @@ import logging
 import re
 import unicodedata
 
+import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz, process
 from sqlalchemy import text
@@ -755,9 +756,7 @@ class TransformRaceResult:
             blob_index,
             {"race_id", "fastest_lap_time", "lap_number", "driver_code", "driver_name"},
         )
-        df["fastest_lap_seconds"] = parse_lap_strings(df["fastest_lap_time"])[
-            "seconds"
-        ]
+        df["fastest_lap_seconds"] = parse_lap_strings(df["fastest_lap_time"])["seconds"]
         df["fastest_lap_number"] = pd.to_numeric(df["lap_number"]).astype("Int64")
         return df[
             [
@@ -905,3 +904,61 @@ class TransformPracticeResult:
         return practice_df
 
 
+class TransformQualResult:
+    def transform(self) -> pd.DataFrame:
+        qual_df = self._extract_qual_results()
+        qual_df = self._convert_time_to_seconds(qual_df)
+        qual_df = self._normalize_team_names(qual_df)
+        return qual_df
+
+    def _extract_qual_results(self) -> pd.DataFrame:
+        blob_index = filter_blob_index(
+            get_blob_container_client(RAW_CONTAINER),
+            list_session_blobs,
+            session="qualifying",
+        )
+        df = concat_blob_frames(
+            blob_index,
+            {
+                "race_id",
+                "driver_name",
+                "team_name",
+                "q1_time",
+                "q2_time",
+                "q3_time",
+                "qual_position",
+                "qual_laps",
+                "driver_code",
+            },
+        )
+        df = df.rename(
+            columns={
+                "team_name": "constructor_name",
+                "q1_time": "q1_seconds",
+                "q2_time": "q2_seconds",
+                "q3_time": "q3_seconds",
+                "qual_position": "qualifying_position",
+                "qual_laps": "qualifying_laps",
+            }
+        ).drop(columns=["session_type"])
+        return df
+
+    def _convert_time_to_seconds(self, qual_df: pd.DataFrame) -> pd.DataFrame:
+        df = qual_df.copy()
+        q_cols = ["q1_seconds", "q2_seconds", "q3_seconds"]
+
+        for col in q_cols:
+            parsed = parse_lap_strings(df[col].replace("", np.nan))
+            df[col] = parsed["seconds"].round(3)
+
+        return df
+
+    def _normalize_team_names(self, qual_df: pd.DataFrame) -> pd.DataFrame:
+        team_aliases = {
+            normalize_text(alias).casefold(): name
+            for alias, name in constructor_mapping["team_name"].items()
+        }
+        qual_df["constructor_name"] = qual_df["constructor_name"].map(
+            lambda name: team_aliases.get(name.casefold(), name)
+        )
+        return qual_df
