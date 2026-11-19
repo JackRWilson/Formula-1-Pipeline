@@ -933,3 +933,43 @@ class TransformQualResult:
             lambda name: team_aliases.get(name.casefold(), name)
         )
         return qual_df
+
+
+class TransformPitStops:
+    def transform(self) -> pd.DataFrame:
+        pits_df = self._extract_pits()
+        pits_df = self._normalize_team_names(pits_df)
+        return pits_df
+
+    def _extract_pits(self) -> pd.DataFrame:
+        df = load_blobs(
+            SESSION_SOURCE,
+            {
+                "race_id",
+                "driver_name",
+                "team_name",
+                "stop_number",
+                "stop_lap",
+                "pits_time",
+                "driver_code",
+            },
+            folders=PIT_STOP_FOLDERS,
+            filters={"session": "pit-stop-summary"},
+        )
+        df = df.rename(
+            columns={
+                "team_name": "constructor_name",
+                "pit_time": "pit_duration_seconds",
+            }
+        )
+        return df
+
+    def _normalize_team_names(self, pits_df: pd.DataFrame) -> pd.DataFrame:
+        team_aliases = {
+            normalize_text(alias).casefold(): name
+            for alias, name in constructor_mapping["team_name"].items()
+        }
+        pits_df["constructor_name"] = pits_df["constructor_name"].map(
+            lambda name: team_aliases.get(name.casefold(), name)
+        )
+        return pits_df
