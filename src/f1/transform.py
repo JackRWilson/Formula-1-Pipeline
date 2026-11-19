@@ -7,22 +7,9 @@ from rapidfuzz import fuzz, process
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from f1.constants import (
-    CIRCUIT_FUZZY_SCORE_CUTOFF,
-    CIRCUIT_GENERIC_WORDS,
-    CURATED_CIRCUITS_PATH,
-    DATA_START_YEAR,
-    F1SITE_MANIFEST_TABLE,
-    LAP_TIME_PATTERN,
-    MAX_ROUNDS_BLOB,
-    PHOTON_LOCATIONS_BLOB,
-    RAW_CONTAINER,
-    SESSION_MAP,
-    WIKIPEDIA_CIRCUITS_BLOB,
-)
-from f1.utils import (
-    clean_circuit_name,
-    constructor_mapping,
+from f1.helpers.blob_io import (
+    concat_blob_frames,
+    filter_blob_index,
     get_blob,
     get_blob_container_client,
     list_fastest_lap_blobs,
@@ -30,7 +17,23 @@ from f1.utils import (
     list_jolpi_driver_blobs,
     list_session_blobs,
     load_blobs,
+    require_columns,
 )
+from f1.helpers.constants import (
+    CIRCUIT_FUZZY_SCORE_CUTOFF,
+    CIRCUIT_GENERIC_WORDS,
+    CURATED_CIRCUITS_PATH,
+    DATA_START_YEAR,
+    F1SITE_MANIFEST_TABLE,
+    MAX_ROUNDS_BLOB,
+    PHOTON_LOCATIONS_BLOB,
+    RAW_CONTAINER,
+    WIKIPEDIA_CIRCUITS_BLOB,
+)
+from f1.helpers.constructor_mapping import constructor_mapping
+from f1.helpers.lap_times import SESSION_MAP, parse_lap_strings
+from f1.helpers.text import normalize_text, normalized_key
+from f1.helpers.utils import clean_circuit_name
 
 logger = logging.getLogger(__name__)
 
@@ -43,31 +46,13 @@ LOCATION_COLUMNS = [
 ]
 
 
-def _require_columns(data: pd.DataFrame, columns: set, source: str) -> None:
-    missing = set(columns).difference(data.columns)
-    if missing:
-        raise ValueError(f"{source} is missing required columns: {sorted(missing)}")
-
-
-def _normalize_text(value: object) -> str:
-    if pd.isna(value):
-        return None
-    value = " ".join(str(value).split())
-    return value or None
-
-
-def _normalized_key(value: object) -> str:
-    normalized = clean_circuit_name(_normalize_text(value))
-    return normalized.casefold() if isinstance(normalized, str) and normalized else None
-
-
 class TransformSeason:
     def __init__(self, conn: Connection) -> None:
         self._conn = conn
 
     def transform(self) -> pd.DataFrame:
         data = get_blob(MAX_ROUNDS_BLOB)
-        _require_columns(data, {"year", "max_rounds"}, MAX_ROUNDS_BLOB)
+        require_columns(data, {"year", "max_rounds"}, MAX_ROUNDS_BLOB)
         return self._get_complete_bool(data)
 
     def _get_complete_bool(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -107,7 +92,7 @@ class TransformSeason:
 class TransformLocation:
     def transform(self, circuits: pd.DataFrame = None) -> pd.DataFrame:
         data = get_blob(PHOTON_LOCATIONS_BLOB)
-        _require_columns(
+        require_columns(
             data,
             {
                 "cleaned_name",
@@ -120,19 +105,19 @@ class TransformLocation:
             PHOTON_LOCATIONS_BLOB,
         )
         data = data.copy()
-        data["_venue_key"] = data["cleaned_name"].map(_normalized_key)
+        data["_venue_key"] = data["cleaned_name"].map(normalized_key)
 
         if circuits is not None:
-            _require_columns(circuits, {"location_source_name"}, "circuit data")
+            require_columns(circuits, {"location_source_name"}, "circuit data")
             used_venues = {
                 key
-                for key in circuits["location_source_name"].map(_normalized_key)
+                for key in circuits["location_source_name"].map(normalized_key)
                 if key is not None
             }
             data = data[data["_venue_key"].isin(used_venues)]
 
-        data["city"] = data["city"].map(_normalize_text)
-        data["country"] = data["country"].map(_normalize_text)
+        data["city"] = data["city"].map(normalize_text)
+        data["country"] = data["country"].map(normalize_text)
         data["latitude"] = pd.to_numeric(data["latitude"], errors="raise")
         data["longitude"] = pd.to_numeric(data["longitude"], errors="raise")
         data["elevation_m"] = pd.to_numeric(data["elevation"], errors="coerce")
@@ -180,11 +165,11 @@ class TransformCircuit:
             "gp",
             "seasons",
         }
-        _require_columns(data, required_columns, WIKIPEDIA_CIRCUITS_BLOB)
+        require_columns(data, required_columns, WIKIPEDIA_CIRCUITS_BLOB)
 
         data = data.copy()
         curated = pd.read_csv(CURATED_CIRCUITS_PATH)
-        _require_columns(
+        require_columns(
             curated,
             required_columns | {"location_source_name"},
             str(CURATED_CIRCUITS_PATH),
@@ -192,7 +177,7 @@ class TransformCircuit:
         data = pd.concat([data, curated], ignore_index=True, sort=False)
 
         data["_source_name"] = data["name"].map(
-            lambda name: clean_circuit_name(_normalize_text(name))
+            lambda name: clean_circuit_name(normalize_text(name))
         )
         data["_circuit_key"] = data["_source_name"].map(
             lambda name: name.casefold() if isinstance(name, str) and name else None
@@ -219,10 +204,10 @@ class TransformCircuit:
         circuit_data = pd.DataFrame(
             {
                 "circuit_name": data["_source_name"],
-                "circuit_type": data["type"].map(_normalize_text),
+                "circuit_type": data["type"].map(normalize_text),
                 "direction": data["direction"].map(self._normalize_direction),
-                "location_city": data["location"].map(_normalize_text),
-                "location_country": data["country"].map(_normalize_text),
+                "location_city": data["location"].map(normalize_text),
+                "location_country": data["country"].map(normalize_text),
                 "location_source_name": data["location_source_name"].map(
                     clean_circuit_name
                 ),
@@ -259,7 +244,7 @@ class TransformCircuit:
 
     @staticmethod
     def _normalize_direction(direction: object) -> str:
-        direction = _normalize_text(direction)
+        direction = normalize_text(direction)
         if direction is None:
             return None
         normalized_directions = {
@@ -277,7 +262,7 @@ class TransformConstructor:
     def transform(self) -> pd.DataFrame:
         teams = self._extract_teams()
         team_aliases = {
-            _normalize_text(alias).casefold(): name
+            normalize_text(alias).casefold(): name
             for alias, name in constructor_mapping["team_name"].items()
         }
         teams["constructor_name"] = teams["constructor_name"].map(
@@ -302,9 +287,9 @@ class TransformConstructor:
         team_names = set()
         for row in race_results.itertuples():
             df = get_blob(row.blob_name)
-            _require_columns(df, {"team_name"}, row.blob_name)
+            require_columns(df, {"team_name"}, row.blob_name)
             team_names.update(
-                name for name in df["team_name"].map(_normalize_text).dropna().unique()
+                name for name in df["team_name"].map(normalize_text).dropna().unique()
             )
         if not team_names:
             raise ValueError("Race-result blobs contained no constructor names")
@@ -371,14 +356,14 @@ class TransformDriver:
         frames = []
         for row in blob_index.itertuples():
             df = get_blob(row.blob_name)
-            _require_columns(df, {"driver_name", "driver_code"}, row.blob_name)
+            require_columns(df, {"driver_name", "driver_code"}, row.blob_name)
             frames.append(df[["driver_name", "driver_code"]].drop_duplicates())
         return pd.concat(frames, ignore_index=True).drop_duplicates()
 
     def _clean_session_pairs(self, pairs: pd.DataFrame) -> pd.DataFrame:
         pairs = pairs.copy()
-        pairs["driver_code"] = pairs["driver_code"].map(_normalize_text)
-        pairs["driver_name"] = pairs["driver_name"].map(_normalize_text)
+        pairs["driver_code"] = pairs["driver_code"].map(normalize_text)
+        pairs["driver_name"] = pairs["driver_name"].map(normalize_text)
         pairs = pairs.dropna()
         pairs["_name_key"] = self._name_key(pairs["driver_name"])
         return pairs
@@ -393,7 +378,7 @@ class TransformDriver:
     def _latest_jolpi_drivers(self, jolpi_drivers: pd.DataFrame) -> pd.DataFrame:
         data = jolpi_drivers.copy()
         for column in ("first_name", "last_name", "driver_code"):
-            data[column] = data[column].map(_normalize_text)
+            data[column] = data[column].map(normalize_text)
         data = data.sort_values("season_year", kind="stable")
 
         drivers = data.groupby("source_driver_id", as_index=False).last()[
@@ -498,19 +483,14 @@ class TransformRace:
         return races_df
 
     def _extract_races(self) -> pd.DataFrame:
-        container = get_blob_container_client(RAW_CONTAINER)
-        blob_index = list_session_blobs(container)
-        race_results = blob_index[blob_index["session"] == "race-result"]
-        if race_results.empty:
-            raise ValueError("No F1 session blobs found for race extraction")
-
-        frames = []
-        for row in race_results.itertuples():
-            df = get_blob(row.blob_name)
-            df["round"] = row.round
-            _require_columns(df, {"race_id", "year", "round"}, row.blob_name)
-            frames.append(df)
-        return pd.concat(frames, ignore_index=True).drop_duplicates()
+        blob_index = filter_blob_index(
+            get_blob_container_client(RAW_CONTAINER),
+            list_session_blobs,
+            session="race-result",
+        )
+        return concat_blob_frames(
+            blob_index, {"race_id", "year", "round"}, add_round=True
+        )
 
     def _group_race_date(self, races_df: pd.DataFrame) -> pd.DataFrame:
         return (
@@ -725,61 +705,57 @@ class TransformRaceResult:
 
         return results_df
 
-    def _filter_blob_index(self, list_blobs, **filters) -> pd.DataFrame:
-        container = get_blob_container_client(RAW_CONTAINER)
-        blob_index = list_blobs(container)
-
-        mask = pd.Series(True, index=blob_index.index)
-        for column, value in filters.items():
-            mask &= blob_index[column] == value
-
-        results = blob_index[mask]
-        if results.empty:
-            described = ", ".join(f"{k}={v}" for k, v in filters.items())
-            raise ValueError(f"No F1 blobs found for {described}")
-        return results
-
-    def _concat_blob_frames(
-        self,
-        blob_index: pd.DataFrame,
-        required_columns: set,
-        transform=None,
-        add_round: bool = False,
-    ) -> pd.DataFrame:
-        frames = []
-        for row in blob_index.itertuples():
-            df = get_blob(row.blob_name)
-            if add_round:
-                df["round"] = row.round
-            if transform is not None:
-                df = transform(df)
-            _require_columns(df, required_columns, row.blob_name)
-            frames.append(df)
-        return pd.concat(frames, ignore_index=True).drop_duplicates()
-
     def _extract_race_results(self) -> pd.DataFrame:
-        blob_index = self._filter_blob_index(list_session_blobs, session="race-result")
-        return self._concat_blob_frames(
-            blob_index, {"race_id", "year", "round", "driver_code"}, add_round=True
+        blob_index = filter_blob_index(
+            get_blob_container_client(RAW_CONTAINER),
+            list_session_blobs,
+            session="race-result",
+        )
+        return concat_blob_frames(
+            blob_index,
+            {
+                "race_id",
+                "year",
+                "round",
+                "driver_name",
+                "driver_code",
+                "team_name",
+                "end_position",
+                "laps_completed",
+            },
+            add_round=True,
         )
 
     def _extract_starting_grid(self) -> pd.DataFrame:
-        blob_index = self._filter_blob_index(list_grid_blobs, session="starting-grid")
-        return self._concat_blob_frames(
+        blob_index = filter_blob_index(
+            get_blob_container_client(RAW_CONTAINER),
+            list_grid_blobs,
+            session="starting-grid",
+        )
+        return concat_blob_frames(
             blob_index,
-            {"race_id", "driver_name", "round", "driver_code", "team_name"},
+            {
+                "race_id",
+                "driver_name",
+                "team_name",
+                "start_position",
+                "round",
+                "driver_code",
+            },
             add_round=True,
         )
 
     def _extract_fastest_laps(self) -> pd.DataFrame:
-        blob_index = self._filter_blob_index(
-            list_fastest_lap_blobs, session="fastest-laps"
+        blob_index = filter_blob_index(
+            get_blob_container_client(RAW_CONTAINER),
+            list_fastest_lap_blobs,
+            session="fastest-laps",
         )
-        df = self._concat_blob_frames(
+        df = concat_blob_frames(
             blob_index,
             {"race_id", "fastest_lap_time", "lap_number", "driver_code", "driver_name"},
         )
-        df["fastest_lap_seconds"] = self._parse_lap_strings(df["fastest_lap_time"])[
+        df["fastest_lap_seconds"] = parse_lap_strings(df["fastest_lap_time"])[
             "seconds"
         ]
         df["fastest_lap_number"] = pd.to_numeric(df["lap_number"]).astype("Int64")
@@ -841,23 +817,9 @@ class TransformRaceResult:
         df["result_status"] = status
         return df
 
-    @staticmethod
-    def _parse_lap_strings(raw: pd.Series) -> pd.DataFrame:
-        parts = raw.astype("string").str.strip().str.extract(LAP_TIME_PATTERN)
-        minutes = pd.to_numeric(parts["minutes"]).astype("float64")
-        seconds = pd.to_numeric(parts["seconds"]).astype("float64")
-        fraction = pd.to_numeric("0." + parts["fraction"]).astype("float64")
-        return pd.DataFrame(
-            {
-                "is_gap": parts["gap"].notna(),
-                "seconds": minutes.fillna(0) * 60 + seconds + fraction,
-            },
-            index=raw.index,
-        )
-
     def _normalize_team_names(self, result_df: pd.DataFrame) -> pd.DataFrame:
         team_aliases = {
-            _normalize_text(alias).casefold(): name
+            normalize_text(alias).casefold(): name
             for alias, name in constructor_mapping["team_name"].items()
         }
         result_df["constructor_name"] = result_df["constructor_name"].map(
@@ -881,48 +843,22 @@ class TransformPracticeResult:
         practice_df = self._normalize_team_names(practice_df)
         return practice_df
 
-    def _filter_blob_index(self, list_blobs, **filters) -> pd.DataFrame:
-        container = get_blob_container_client(RAW_CONTAINER)
-        blob_index = list_blobs(container)
-
-        mask = pd.Series(True, index=blob_index.index)
-        for column, value in filters.items():
-            mask &= blob_index[column] == value
-
-        results = blob_index[mask]
-        if results.empty:
-            described = ", ".join(f"{k}={v}" for k, v in filters.items())
-            raise ValueError(f"No F1 blobs found for {described}")
-        return results
-
-    def _concat_blob_frames(
-        self,
-        blob_index: pd.DataFrame,
-        required_columns: set,
-        transform=None,
-        add_round: bool = False,
-    ) -> pd.DataFrame:
-        frames = []
-        for row in blob_index.itertuples():
-            df = get_blob(row.blob_name)
-            if add_round:
-                df["round"] = row.round
-            if transform is not None:
-                df = transform(df)
-            _require_columns(df, required_columns, row.blob_name)
-            frames.append(df)
-        return pd.concat(frames, ignore_index=True).drop_duplicates()
-
     def _extract_practice_results(self) -> pd.DataFrame:
-        blob_index = self._filter_blob_index(list_session_blobs, session="practice")
-        return self._concat_blob_frames(
+        blob_index = filter_blob_index(
+            get_blob_container_client(RAW_CONTAINER),
+            list_session_blobs,
+            session="practice",
+        )
+        return concat_blob_frames(
             blob_index,
             {
                 "race_id",
                 "driver_name",
                 "team_name",
-                "lap_time",
                 "session_type",
+                "lap_time",
+                "lap_count",
+                "position",
                 "round",
                 "driver_code",
             },
@@ -930,22 +866,9 @@ class TransformPracticeResult:
         )
 
     @staticmethod
-    def _parse_lap_strings(raw: pd.Series) -> pd.DataFrame:
-        parts = raw.astype("string").str.strip().str.extract(LAP_TIME_PATTERN)
-        minutes = pd.to_numeric(parts["minutes"]).astype("float64")
-        seconds = pd.to_numeric(parts["seconds"]).astype("float64")
-        fraction = pd.to_numeric("0." + parts["fraction"]).astype("float64")
-        return pd.DataFrame(
-            {
-                "is_gap": parts["gap"].notna(),
-                "seconds": minutes.fillna(0) * 60 + seconds + fraction,
-            },
-            index=raw.index,
-        )
-
-    def _best_practice_laps(self, practice_df: pd.DataFrame) -> pd.DataFrame:
+    def _best_practice_laps(practice_df: pd.DataFrame) -> pd.DataFrame:
         df = practice_df.copy()
-        parsed = self._parse_lap_strings(df["lap_time"])
+        parsed = parse_lap_strings(df["lap_time"])
         keys = ["race_id", "session_type"]
 
         absolute = parsed["seconds"].where(~parsed["is_gap"])
@@ -973,10 +896,12 @@ class TransformPracticeResult:
 
     def _normalize_team_names(self, practice_df: pd.DataFrame) -> pd.DataFrame:
         team_aliases = {
-            _normalize_text(alias).casefold(): name
+            normalize_text(alias).casefold(): name
             for alias, name in constructor_mapping["team_name"].items()
         }
         practice_df["constructor_name"] = practice_df["constructor_name"].map(
             lambda name: team_aliases.get(name.casefold(), name)
         )
         return practice_df
+
+

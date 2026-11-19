@@ -2,14 +2,6 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from f1.constants import (
-    F1SITE_MANIFEST_TABLE,
-    FASTF1_SESSION_TABLE,
-    MAX_ROUNDS_BLOB,
-    PHOTON_LOCATIONS_BLOB,
-    RAW_CONTAINER,
-    WIKIPEDIA_CIRCUITS_BLOB,
-)
 from f1.extract import (
     ExtractF1Site,
     ExtractFastF1,
@@ -17,17 +9,26 @@ from f1.extract import (
     ExtractPhoton,
     ExtractWikipedia,
 )
+from f1.helpers.blob_io import download_df_from_blob
+from f1.helpers.constants import (
+    F1SITE_MANIFEST_TABLE,
+    FASTF1_SESSION_TABLE,
+    MAX_ROUNDS_BLOB,
+    PHOTON_LOCATIONS_BLOB,
+    RAW_CONTAINER,
+    WIKIPEDIA_CIRCUITS_BLOB,
+)
 from f1.transform import (
     TransformCircuit,
     TransformConstructor,
     TransformDriver,
     TransformLocation,
     TransformPracticeResult,
+    TransformQualResult,
     TransformRace,
     TransformRaceResult,
     TransformSeason,
 )
-from f1.utils import download_df_from_blob
 
 pd.set_option("display.max_columns", None)
 pd.set_option("display.width", 1000)
@@ -52,11 +53,11 @@ class ETLProcessor:
         # constructor_df = TransformConstructor().transform()
         # driver_df = TransformDriver().transform()
         # race_df = TransformRace().transform(circuit_df)
-        race_result_df = TransformRaceResult().transform()
+        # race_result_df = TransformRaceResult().transform()
         # practice_result_df = TransformPracticeResult().transform()
-        # print(location_df)
-        print(race_result_df)
-        race_result_df.to_csv("test.csv", index=False)
+        qual_result_df = TransformQualResult().transform()
+        print(qual_result_df)
+        qual_result_df.to_csv("test.csv", index=False)
 
         print("ETL complete")
 

@@ -14,7 +14,19 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, RowMapping
 
-from f1.constants import (
+from f1.helpers.blob_io import (
+    download_df_from_blob,
+    get_blob_container_client,
+    upload_df_to_blob,
+)
+from f1.helpers.browser import (
+    create_browser,
+    get_date,
+    get_track,
+    print_progress_bar,
+    scrape_url_table,
+)
+from f1.helpers.constants import (
     DATA_START_YEAR,
     F1SITE_MANIFEST_TABLE,
     FASTF1_CACHE_PATH,
@@ -33,17 +45,9 @@ from f1.constants import (
     WIKIPEDIA_CIRCUITS_BLOB,
     WIKIPEDIA_CIRCUITS_URL,
 )
-from f1.utils import (
+from f1.helpers.utils import (
     clean_circuit_name,
-    create_browser,
-    download_df_from_blob,
-    get_blob_container_client,
-    get_date,
     get_location_data,
-    get_track,
-    print_progress_bar,
-    scrape_url_table,
-    upload_df_to_blob,
 )
 
 logger = logging.getLogger(__name__)
