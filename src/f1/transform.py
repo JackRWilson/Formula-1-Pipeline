@@ -9,14 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from f1.helpers.blob_io import (
-    concat_blob_frames,
-    filter_blob_index,
     get_blob,
-    get_blob_container_client,
-    list_fastest_lap_blobs,
-    list_grid_blobs,
-    list_jolpi_driver_blobs,
-    list_session_blobs,
     load_blobs,
     require_columns,
 )
@@ -26,9 +19,18 @@ from f1.helpers.constants import (
     CURATED_CIRCUITS_PATH,
     DATA_START_YEAR,
     F1SITE_MANIFEST_TABLE,
+    FASTEST_LAP_FOLDERS,
+    JOLPI_DRIVER_COLUMNS,
+    JOLPI_DRIVERS_SOURCE,
     MAX_ROUNDS_BLOB,
     PHOTON_LOCATIONS_BLOB,
-    RAW_CONTAINER,
+    PIT_STOP_FOLDERS,
+    PRACTICE_FOLDERS,
+    QUALIFYING_FOLDERS,
+    RACE_RESULT_FOLDERS,
+    SESSION_RESULT_FOLDERS,
+    SESSION_SOURCE,
+    STARTING_GRID_FOLDERS,
     WIKIPEDIA_CIRCUITS_BLOB,
 )
 from f1.helpers.constructor_mapping import constructor_mapping
@@ -277,21 +279,15 @@ class TransformConstructor:
 
     @staticmethod
     def _extract_teams() -> pd.DataFrame:
-        container = get_blob_container_client(RAW_CONTAINER)
-        blob_index = list_session_blobs(container)
-        if blob_index.empty:
-            raise ValueError("No F1 session blobs found for constructor extraction")
-        race_results = blob_index[blob_index["session"].eq("race-result")]
-        if race_results.empty:
-            raise ValueError("No race-result blobs found for constructor extraction")
-
-        team_names = set()
-        for row in race_results.itertuples():
-            df = get_blob(row.blob_name)
-            require_columns(df, {"team_name"}, row.blob_name)
-            team_names.update(
-                name for name in df["team_name"].map(normalize_text).dropna().unique()
-            )
+        race_results = load_blobs(
+            SESSION_SOURCE,
+            {"team_name"},
+            folders=RACE_RESULT_FOLDERS,
+            transform=lambda data: data[["team_name"]],
+        )
+        team_names = set(
+            race_results["team_name"].map(normalize_text).dropna().unique()
+        )
         if not team_names:
             raise ValueError("Race-result blobs contained no constructor names")
         return pd.DataFrame({"constructor_name": sorted(team_names)})
@@ -341,25 +337,16 @@ class TransformDriver:
 
     @staticmethod
     def _extract_jolpi_drivers() -> pd.DataFrame:
-        container = get_blob_container_client(RAW_CONTAINER)
-        blob_index = list_jolpi_driver_blobs(container)
-        if blob_index.empty:
-            raise ValueError("No jolpi driver blobs found for driver extraction")
-        return load_blobs(blob_index)
+        return load_blobs(JOLPI_DRIVERS_SOURCE, set(JOLPI_DRIVER_COLUMNS))
 
     @staticmethod
     def _extract_session_pairs() -> pd.DataFrame:
-        container = get_blob_container_client(RAW_CONTAINER)
-        blob_index = list_session_blobs(container)
-        if blob_index.empty:
-            raise ValueError("No F1 session blobs found for driver extraction")
-
-        frames = []
-        for row in blob_index.itertuples():
-            df = get_blob(row.blob_name)
-            require_columns(df, {"driver_name", "driver_code"}, row.blob_name)
-            frames.append(df[["driver_name", "driver_code"]].drop_duplicates())
-        return pd.concat(frames, ignore_index=True).drop_duplicates()
+        return load_blobs(
+            SESSION_SOURCE,
+            {"driver_name", "driver_code"},
+            folders=SESSION_RESULT_FOLDERS,
+            transform=lambda data: data[["driver_name", "driver_code"]],
+        )
 
     def _clean_session_pairs(self, pairs: pd.DataFrame) -> pd.DataFrame:
         pairs = pairs.copy()
@@ -484,13 +471,12 @@ class TransformRace:
         return races_df
 
     def _extract_races(self) -> pd.DataFrame:
-        blob_index = filter_blob_index(
-            get_blob_container_client(RAW_CONTAINER),
-            list_session_blobs,
-            session="race-result",
-        )
-        return concat_blob_frames(
-            blob_index, {"race_id", "year", "round"}, add_round=True
+        return load_blobs(
+            SESSION_SOURCE,
+            {"race_id", "year", "round"},
+            folders=RACE_RESULT_FOLDERS,
+            filters={"session": "race-result"},
+            add_round=True,
         )
 
     def _group_race_date(self, races_df: pd.DataFrame) -> pd.DataFrame:
@@ -707,13 +693,8 @@ class TransformRaceResult:
         return results_df
 
     def _extract_race_results(self) -> pd.DataFrame:
-        blob_index = filter_blob_index(
-            get_blob_container_client(RAW_CONTAINER),
-            list_session_blobs,
-            session="race-result",
-        )
-        return concat_blob_frames(
-            blob_index,
+        return load_blobs(
+            SESSION_SOURCE,
             {
                 "race_id",
                 "year",
@@ -724,17 +705,14 @@ class TransformRaceResult:
                 "end_position",
                 "laps_completed",
             },
+            folders=RACE_RESULT_FOLDERS,
+            filters={"session": "race-result"},
             add_round=True,
         )
 
     def _extract_starting_grid(self) -> pd.DataFrame:
-        blob_index = filter_blob_index(
-            get_blob_container_client(RAW_CONTAINER),
-            list_grid_blobs,
-            session="starting-grid",
-        )
-        return concat_blob_frames(
-            blob_index,
+        return load_blobs(
+            SESSION_SOURCE,
             {
                 "race_id",
                 "driver_name",
@@ -743,18 +721,17 @@ class TransformRaceResult:
                 "round",
                 "driver_code",
             },
+            folders=STARTING_GRID_FOLDERS,
+            filters={"session": "starting-grid"},
             add_round=True,
         )
 
     def _extract_fastest_laps(self) -> pd.DataFrame:
-        blob_index = filter_blob_index(
-            get_blob_container_client(RAW_CONTAINER),
-            list_fastest_lap_blobs,
-            session="fastest-laps",
-        )
-        df = concat_blob_frames(
-            blob_index,
+        df = load_blobs(
+            SESSION_SOURCE,
             {"race_id", "fastest_lap_time", "lap_number", "driver_code", "driver_name"},
+            folders=FASTEST_LAP_FOLDERS,
+            filters={"session": "fastest-laps"},
         )
         df["fastest_lap_seconds"] = parse_lap_strings(df["fastest_lap_time"])["seconds"]
         df["fastest_lap_number"] = pd.to_numeric(df["lap_number"]).astype("Int64")
@@ -843,13 +820,8 @@ class TransformPracticeResult:
         return practice_df
 
     def _extract_practice_results(self) -> pd.DataFrame:
-        blob_index = filter_blob_index(
-            get_blob_container_client(RAW_CONTAINER),
-            list_session_blobs,
-            session="practice",
-        )
-        return concat_blob_frames(
-            blob_index,
+        return load_blobs(
+            SESSION_SOURCE,
             {
                 "race_id",
                 "driver_name",
@@ -861,6 +833,8 @@ class TransformPracticeResult:
                 "round",
                 "driver_code",
             },
+            folders=PRACTICE_FOLDERS,
+            filters={"session": "practice"},
             add_round=True,
         )
 
@@ -912,13 +886,8 @@ class TransformQualResult:
         return qual_df
 
     def _extract_qual_results(self) -> pd.DataFrame:
-        blob_index = filter_blob_index(
-            get_blob_container_client(RAW_CONTAINER),
-            list_session_blobs,
-            session="qualifying",
-        )
-        df = concat_blob_frames(
-            blob_index,
+        df = load_blobs(
+            SESSION_SOURCE,
             {
                 "race_id",
                 "driver_name",
@@ -930,6 +899,8 @@ class TransformQualResult:
                 "qual_laps",
                 "driver_code",
             },
+            folders=QUALIFYING_FOLDERS,
+            filters={"session": "qualifying"},
         )
         df = df.rename(
             columns={

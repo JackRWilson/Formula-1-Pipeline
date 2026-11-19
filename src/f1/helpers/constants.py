@@ -1,7 +1,9 @@
 import re
 from pathlib import Path
+from re import Pattern
+from typing import NamedTuple
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 DATA_START_YEAR = 2018
 RAW_CONTAINER = "f1-raw"
@@ -66,26 +68,33 @@ CIRCUIT_GENERIC_WORDS = {
 }
 
 # Blob layouts used by the shared blob-index helpers in blob_io.py.
-SESSIONS = [
+SESSION_RESULT_FOLDERS = (
     "practice",
     "qualifying",
     "sprint-qualifying",
     "race-result",
     "sprint-result",
-]
+    "sprint-results",
+)
+SESSION_BLOB_FOLDERS = SESSION_RESULT_FOLDERS + (
+    "starting-grid",
+    "sprint-grid",
+    "fastest-laps",
+    "pit-stop-summary",
+)
+RACE_RESULT_FOLDERS = ("race-result",)
+STARTING_GRID_FOLDERS = ("starting-grid",)
+FASTEST_LAP_FOLDERS = ("fastest-laps",)
+PRACTICE_FOLDERS = ("practice",)
+QUALIFYING_FOLDERS = ("qualifying",)
+PIT_STOP_FOLDERS = ("pit-stop-summary",)
+
 SESSION_BLOB_PATTERN = re.compile(
-    rf"^(?P<session>{'|'.join(SESSIONS)})"
+    rf"^(?P<session>{'|'.join(map(re.escape, SESSION_BLOB_FOLDERS))})"
     r"/(?:(?P<session_number>\d+)/)?"
     r"(?P<year>\d{4})/(?P<round>\d+)\.parquet$"
 )
-GRIDS = ["starting-grid", "sprint-grid"]
-GRID_BLOB_PATTERN = re.compile(
-    rf"^(?P<session>{'|'.join(GRIDS)})"
-    r"/(?P<year>\d{4})/(?P<round>\d+)\.parquet$"
-)
-FASTEST_LAP_BLOB_PATTERN = re.compile(
-    r"^(?P<session>fastest-laps)/(?P<year>\d{4})/(?P<round>\d+)\.parquet$"
-)
+
 JOLPI_DRIVERS_PATTERN = re.compile(
     rf"^{re.escape(JOLPI_DRIVERS_BLOB_PREFIX)}/(?P<year>\d{{4}})\.parquet$"
 )
@@ -108,4 +117,15 @@ FASTF1_BLOB_PATTERN = re.compile(
     rf"_(?P<kind>{'|'.join(FASTF1_KINDS)})"
     r"\.parquet$"
 )
-INT_GROUPS = ("year", "round")
+INT_GROUPS = ("year", "round", "session_number")
+
+
+class BlobSource(NamedTuple):
+    pattern: Pattern[str]
+    folders: tuple[str, ...]
+
+SESSION_SOURCE = BlobSource(SESSION_BLOB_PATTERN, SESSION_BLOB_FOLDERS)
+JOLPI_DRIVERS_SOURCE = BlobSource(
+    JOLPI_DRIVERS_PATTERN, (JOLPI_DRIVERS_BLOB_PREFIX,)
+)
+FASTF1_SOURCE = BlobSource(FASTF1_BLOB_PATTERN, ("fastf1",))

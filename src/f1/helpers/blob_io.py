@@ -1,8 +1,8 @@
 import hashlib
 import io
 import os
-import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from re import Pattern
 
 import pandas as pd
 from azure.core.exceptions import ResourceExistsError
@@ -10,16 +10,9 @@ from azure.storage.blob import BlobServiceClient, ContainerClient
 
 from f1.helpers.constants import (
     DATA_START_YEAR,
-    FASTEST_LAP_BLOB_PATTERN,
-    FASTF1_BLOB_PATTERN,
-    GRID_BLOB_PATTERN,
-    GRIDS,
     INT_GROUPS,
-    JOLPI_DRIVERS_BLOB_PREFIX,
-    JOLPI_DRIVERS_PATTERN,
     RAW_CONTAINER,
-    SESSION_BLOB_PATTERN,
-    SESSIONS,
+    BlobSource,
 )
 
 
@@ -69,32 +62,19 @@ def get_blob(blob_name: str) -> pd.DataFrame:
     return data
 
 
-def load_blobs(blob_index: pd.DataFrame) -> pd.DataFrame:
-    frames = []
-    for row in blob_index.itertuples(index=False):
-        df = get_blob(row.blob_name)
-        meta = {
-            key: value for key, value in row._asdict().items() if key != "blob_name"
-        }
-        frames.append(df.assign(**meta))
-    if not frames:
-        raise ValueError("No blobs to load; check the pattern and prefixes")
-    return pd.concat(frames, ignore_index=True)
-
-
 def list_blobs_matching(
     container_client: ContainerClient,
-    pattern: re.Pattern,
-    prefixes: list | None = None,
+    pattern: Pattern[str],
+    prefixes: list[str] | None = None,
     min_year: int | None = None,
 ) -> pd.DataFrame:
     rows = []
-    for prefix in prefixes or [None]:
+    for prefix in [None] if prefixes is None else prefixes:
         for blob in container_client.list_blobs(name_starts_with=prefix):
-            match = pattern.match(blob.name)
-            if match is None:
+            parsed_name = pattern.match(blob.name)
+            if parsed_name is None:
                 continue
-            row = {"blob_name": blob.name, **match.groupdict()}
+            row = {"blob_name": blob.name, **parsed_name.groupdict()}
             for key in INT_GROUPS:
                 if row.get(key) is not None:
                     row[key] = int(row[key])
@@ -110,48 +90,18 @@ def list_blobs_matching(
     return pd.DataFrame(rows, columns=columns)
 
 
-def list_session_blobs(container_client: ContainerClient) -> pd.DataFrame:
+def list_blobs(
+    container_client: ContainerClient,
+    source: BlobSource,
+    folders: tuple[str, ...] | None = None,
+    min_year: int = DATA_START_YEAR,
+) -> pd.DataFrame:
+    selected_folders = source.folders if folders is None else folders
     return list_blobs_matching(
         container_client,
-        SESSION_BLOB_PATTERN,
-        prefixes=[f"{session}/" for session in SESSIONS],
-        min_year=DATA_START_YEAR,
-    )
-
-
-def list_grid_blobs(container_client: ContainerClient) -> pd.DataFrame:
-    return list_blobs_matching(
-        container_client,
-        GRID_BLOB_PATTERN,
-        prefixes=[f"{grid}/" for grid in GRIDS],
-        min_year=DATA_START_YEAR,
-    )
-
-
-def list_fastest_lap_blobs(container_client: ContainerClient) -> pd.DataFrame:
-    return list_blobs_matching(
-        container_client,
-        FASTEST_LAP_BLOB_PATTERN,
-        prefixes=["fastest-laps/"],
-        min_year=DATA_START_YEAR,
-    )
-
-
-def list_jolpi_driver_blobs(container_client: ContainerClient) -> pd.DataFrame:
-    return list_blobs_matching(
-        container_client,
-        JOLPI_DRIVERS_PATTERN,
-        prefixes=[f"{JOLPI_DRIVERS_BLOB_PREFIX}/"],
-        min_year=DATA_START_YEAR,
-    )
-
-
-def list_fastf1_blobs(container_client: ContainerClient) -> pd.DataFrame:
-    return list_blobs_matching(
-        container_client,
-        FASTF1_BLOB_PATTERN,
-        prefixes=["fastf1/"],
-        min_year=DATA_START_YEAR,
+        source.pattern,
+        prefixes=[f"{folder}/" for folder in selected_folders],
+        min_year=min_year,
     )
 
 
@@ -162,16 +112,17 @@ def require_columns(data: pd.DataFrame, columns: set, source: str) -> None:
 
 
 def filter_blob_index(
-    container_client: ContainerClient,
-    list_blobs: Callable[[ContainerClient], pd.DataFrame],
-    **filters: object,
+    blob_index: pd.DataFrame, filters: Mapping[str, object] | None = None
 ) -> pd.DataFrame:
-    blob_index = list_blobs(container_client)
+    filters = filters or {}
+    if blob_index.empty:
+        raise ValueError("No blobs found for the requested source and folders")
 
     mask = pd.Series(True, index=blob_index.index)
     for column, value in filters.items():
+        if column not in blob_index.columns:
+            raise ValueError(f"Blob index has no {column!r} field to filter")
         mask &= blob_index[column] == value
-
     results = blob_index[mask]
     if results.empty:
         described = ", ".join(f"{key}={value}" for key, value in filters.items())
@@ -182,11 +133,14 @@ def filter_blob_index(
 def concat_blob_frames(
     blob_index: pd.DataFrame,
     required_columns: set,
+    transform: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
     add_round: bool = False,
 ) -> pd.DataFrame:
     frames = []
     for row in blob_index.itertuples(index=False):
         df = get_blob(row.blob_name)
+        if transform is not None:
+            df = transform(df)
         if add_round:
             df["round"] = row.round
         require_columns(df, required_columns, row.blob_name)
@@ -194,3 +148,28 @@ def concat_blob_frames(
     if not frames:
         raise ValueError("No blobs to load; check the pattern and filters")
     return pd.concat(frames, ignore_index=True).drop_duplicates()
+
+
+def load_blobs(
+    source: BlobSource,
+    required_columns: set,
+    *,
+    folders: tuple[str, ...] | None = None,
+    filters: Mapping[str, object] | None = None,
+    transform: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
+    add_round: bool = False,
+    min_year: int | None = DATA_START_YEAR,
+    container_client: ContainerClient | None = None,
+) -> pd.DataFrame:
+    if container_client is None:
+        container_client = get_blob_container_client(RAW_CONTAINER)
+    blob_index = list_blobs(
+        container_client, source, folders, min_year=min_year
+    )
+    blob_index = filter_blob_index(blob_index, filters)
+    return concat_blob_frames(
+        blob_index,
+        required_columns,
+        transform=transform,
+        add_round=add_round,
+    )

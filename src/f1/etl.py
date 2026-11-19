@@ -23,6 +23,7 @@ from f1.transform import (
     TransformConstructor,
     TransformDriver,
     TransformLocation,
+    TransformPitStops,
     TransformPracticeResult,
     TransformQualResult,
     TransformRace,
@@ -55,9 +56,10 @@ class ETLProcessor:
         # race_df = TransformRace().transform(circuit_df)
         # race_result_df = TransformRaceResult().transform()
         # practice_result_df = TransformPracticeResult().transform()
-        qual_result_df = TransformQualResult().transform()
-        print(qual_result_df)
-        qual_result_df.to_csv("test.csv", index=False)
+        # qual_result_df = TransformQualResult().transform()
+        pit_stop_df = TransformPitStops().transform()
+        print(pit_stop_df)
+        pit_stop_df.to_csv("test.csv", index=False)
 
         print("ETL complete")
 

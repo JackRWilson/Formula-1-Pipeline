@@ -17,6 +17,7 @@ from sqlalchemy.engine import Connection, RowMapping
 from f1.helpers.blob_io import (
     download_df_from_blob,
     get_blob_container_client,
+    list_blobs,
     upload_df_to_blob,
 )
 from f1.helpers.browser import (
@@ -35,6 +36,7 @@ from f1.helpers.constants import (
     FASTF1_START_YEAR,
     JOLPI_DRIVER_COLUMNS,
     JOLPI_DRIVERS_BLOB_PREFIX,
+    JOLPI_DRIVERS_SOURCE,
     JOLPI_DRIVERS_URL,
     MAX_ROUNDS_BLOB,
     PHOTON_LOCATIONS_BLOB,
@@ -891,12 +893,9 @@ class ExtractJolpiDrivers:
     def extract(self) -> None:
         current_year = date.today().year
         container = get_blob_container_client(RAW_CONTAINER)
-        existing_blobs = {
-            blob.name
-            for blob in container.list_blobs(
-                name_starts_with=f"{JOLPI_DRIVERS_BLOB_PREFIX}/"
-            )
-        }
+        existing_blobs = set(
+            list_blobs(container, JOLPI_DRIVERS_SOURCE)["blob_name"]
+        )
         extracted_years = []
 
         print(
