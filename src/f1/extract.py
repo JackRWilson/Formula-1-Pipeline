@@ -808,17 +808,6 @@ class ExtractFastF1:
         )
         session.load(laps=True, telemetry=False, weather=True, messages=True)
 
-        race_id = self._conn.execute(
-            text("""
-                select race_id
-                from formula_one.race
-                where season_year = :season_year and round = :round_number
-                """),
-            {
-                "season_year": session_info["season_year"],
-                "round_number": session_info["round_number"],
-            },
-        ).scalar()
         frames = {
             data_type: self._get_loaded_frame(session, property_name)
             for data_type, property_name in (
@@ -833,7 +822,6 @@ class ExtractFastF1:
                 blob_names[f"{data_type}_blob_name"] = None
                 continue
             data = frame.copy()
-            data["race_id"] = race_id
             data["season_year"] = session_info["season_year"]
             data["round_number"] = session_info["round_number"]
             data["event_name"] = session_info["event_name"]

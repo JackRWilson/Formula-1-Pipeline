@@ -20,6 +20,7 @@ from f1.helpers.constants import (
     DATA_START_YEAR,
     F1SITE_MANIFEST_TABLE,
     FASTEST_LAP_FOLDERS,
+    FASTF1_SOURCE,
     JOLPI_DRIVER_COLUMNS,
     JOLPI_DRIVERS_SOURCE,
     MAX_ROUNDS_BLOB,
@@ -762,7 +763,11 @@ class TransformRaceResult:
             ]
         ]
         results_df = results_df.rename(
-            columns={"end_position": "finish_position", "team_name": "constructor_name"}
+            columns={
+                "year": "season_year",
+                "end_position": "finish_position",
+                "team_name": "constructor_name",
+            }
         )
 
         grid_df = grid_df.drop(columns=["session_type"])
@@ -973,3 +978,38 @@ class TransformPitStops:
             lambda name: team_aliases.get(name.casefold(), name)
         )
         return pits_df
+
+
+class TransformWeatherSummary:
+    def transform(self) -> pd.DataFrame:
+        return self._extract_weather()
+
+    def _extract_weather(self) -> pd.DataFrame:
+        df = load_blobs(
+            FASTF1_SOURCE,
+            {
+                "AirTemp",
+                "Humidity",
+                "Pressure",
+                "Rainfall",
+                "TrackTemp",
+                "WindSpeed",
+                "season_year",
+                "round_number",
+                "session_name",
+            },
+            filters={"kind": "weather"},
+        )
+        df = df.rename(
+            columns={
+                "AirTemp": "air_temp",
+                "Humidity": "humidity",
+                "Pressure": "pressure",
+                "Rainfall": "rainfall",
+                "TrackTemp": "track_temp",
+                "WindSpeed": "wind_speed",
+                "round_number": "round",
+                "session_name": "session_type",
+            },
+        ).drop(columns=["Time", "race_id", "event_name"], errors="ignore")
+        return df
