@@ -147,7 +147,17 @@ def concat_blob_frames(
         frames.append(df)
     if not frames:
         raise ValueError("No blobs to load; check the pattern and filters")
-    return pd.concat(frames, ignore_index=True).drop_duplicates()
+
+    frames = [f.dropna(axis=1, how="all") for f in frames]
+    frames = [f for f in frames if not f.empty]
+    if not frames:
+        raise ValueError("All blobs were empty after dropping all-NA columns")
+    out = pd.concat(frames, ignore_index=True)
+
+    for col in required_columns - set(out.columns):
+        out[col] = pd.NA
+
+    return out.drop_duplicates()
 
 
 def load_blobs(
@@ -163,9 +173,7 @@ def load_blobs(
 ) -> pd.DataFrame:
     if container_client is None:
         container_client = get_blob_container_client(RAW_CONTAINER)
-    blob_index = list_blobs(
-        container_client, source, folders, min_year=min_year
-    )
+    blob_index = list_blobs(container_client, source, folders, min_year=min_year)
     blob_index = filter_blob_index(blob_index, filters)
     return concat_blob_frames(
         blob_index,
