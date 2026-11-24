@@ -67,6 +67,9 @@ CIRCUIT_GENERIC_WORDS = {
     "e",
 }
 
+BASIC_FLAGS = ["blue", "yellow", "double_yellow", "red"]
+SC_COLS = ["safety_car_count", "vsc_count", "safety_car_laps", "vsc_laps"]
+
 # Blob layouts used by the shared blob-index helpers in blob_io.py.
 SESSION_RESULT_FOLDERS = (
     "practice",

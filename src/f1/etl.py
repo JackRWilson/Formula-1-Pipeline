@@ -30,6 +30,7 @@ from f1.transform import (
     TransformRaceResult,
     TransformSeason,
     TransformWeatherSummary,
+    TransformRaceControlSummary
 )
 
 pd.set_option("display.max_columns", None)
@@ -59,9 +60,10 @@ class ETLProcessor:
         # practice_result_df = TransformPracticeResult().transform()
         # qual_result_df = TransformQualResult().transform()
         # pit_stop_df = TransformPitStops().transform()
-        weather_sum_df = TransformWeatherSummary().transform()
-        print(weather_sum_df)
-        weather_sum_df.to_csv("test.csv", index=False)
+        # weather_sum_df = TransformWeatherSummary().transform()
+        race_control_df = TransformRaceControlSummary().transform()
+        print(race_control_df)
+        race_control_df.to_csv("test.csv", index=False)
 
         print("ETL complete")
 

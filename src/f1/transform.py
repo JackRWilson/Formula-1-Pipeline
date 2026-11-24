@@ -14,6 +14,7 @@ from f1.helpers.blob_io import (
     require_columns,
 )
 from f1.helpers.constants import (
+    BASIC_FLAGS,
     CIRCUIT_FUZZY_SCORE_CUTOFF,
     CIRCUIT_GENERIC_WORDS,
     CURATED_CIRCUITS_PATH,
@@ -29,6 +30,7 @@ from f1.helpers.constants import (
     PRACTICE_FOLDERS,
     QUALIFYING_FOLDERS,
     RACE_RESULT_FOLDERS,
+    SC_COLS,
     SESSION_RESULT_FOLDERS,
     SESSION_SOURCE,
     STARTING_GRID_FOLDERS,
@@ -1012,4 +1014,119 @@ class TransformWeatherSummary:
                 "session_name": "session_type",
             },
         ).drop(columns=["Time", "race_id", "event_name"], errors="ignore")
+        df["session_type"] = df["session_type"].rename(
+            "Sprint Shootout", "Sprint Qualifying"
+        )
+        return df
+
+
+class TransformRaceControlSummary:
+    def transform(self) -> pd.DataFrame:
+        df = self._extract_messages()
+        df = df.assign(flag_norm=self._normalize_flags(df["Flag"]))
+
+        flag_count_df = self._count_flags(df)
+        race_end_lap = self._find_end_lap(df)
+        sc_count_df = self._get_safety_car_summary(df, race_end_lap)
+
+        race_control_df = self._agg_columns(flag_count_df, sc_count_df)
+        return race_control_df
+
+    def _extract_messages(self) -> pd.DataFrame:
+        return load_blobs(
+            FASTF1_SOURCE,
+            {
+                "Time",
+                "Category",
+                "Message",
+                "Status",
+                "Flag",
+                "Lap",
+                "season_year",
+                "round_number",
+                "session_name",
+            },
+            filters={"kind": "messages"},
+        )
+
+    @staticmethod
+    def _normalize_flags(flags: pd.Series) -> pd.Series:
+        return (
+            flags.astype(str).str.lower().str.strip().str.replace("_", " ", regex=False)
+        )
+
+    @staticmethod
+    def _count_flags(df: pd.DataFrame) -> pd.DataFrame:
+        flag_cols = [f.lower().strip().replace("_", " ") for f in BASIC_FLAGS]
+        counts = pd.crosstab(
+            [df[k] for k in ["season_year", "round_number", "session_name"]],
+            df["flag_norm"],
+        ).reindex(columns=flag_cols, fill_value=0)
+        counts.columns = [f"{c.replace(' ', '_')}_flag_count" for c in counts.columns]
+        return counts
+
+    @staticmethod
+    def _find_end_lap(df: pd.DataFrame) -> pd.Series:
+        is_chq = df["flag_norm"].isin(["chequered", "checkered"])
+        g = df.assign(chq_lap=df["Lap"].where(is_chq)).groupby(
+            ["season_year", "round_number", "session_name"]
+        )
+        total_laps = g["Lap"].max()
+        race_end_lap = g["chq_lap"].max().fillna(total_laps)
+        return race_end_lap
+
+    def _get_safety_car_summary(
+        self, df: pd.DataFrame, race_end_lap: pd.Series
+    ) -> pd.DataFrame:
+        sc = (
+            df[df["Category"] == "SafetyCar"]
+            .sort_values(["Lap", "Time"], kind="stable")
+            .assign(
+                kind=lambda d: np.where(
+                    d["Message"].str.contains("VIRTUAL", case=False, na=False),
+                    "vsc",
+                    "sc",
+                )
+            )
+        )
+        results = {
+            key: self._walk_sc_session(grp, race_end_lap[key])
+            for key, grp in sc.groupby(["season_year", "round_number", "session_name"])
+        }
+        return pd.DataFrame(
+            list(results.values()),
+            columns=SC_COLS,
+            index=pd.MultiIndex.from_tuples(
+                list(results), names=["season_year", "round_number", "session_name"]
+            ),
+        )
+
+    @staticmethod
+    def _walk_sc_session(grp: pd.DataFrame, end_lap: int) -> list:
+        deployments = {"sc": 0, "vsc": 0}
+        laps = {"sc": 0, "vsc": 0}
+        open_kind, open_lap = None, None
+
+        for k, status, lap in zip(grp["kind"], grp["Status"], grp["Lap"]):
+            if status == "DEPLOYED":
+                deployments[k] += 1
+                if open_kind is not None:
+                    laps[open_kind] += lap - open_lap
+                open_kind, open_lap = k, lap
+            elif status in ("IN THIS LAP", "ENDING") and k == open_kind:
+                laps[k] += lap - open_lap + 1
+                open_kind = None
+
+        if open_kind is not None:
+            laps[open_kind] += end_lap - open_lap + 1
+
+        return [deployments["sc"], deployments["vsc"], laps["sc"], laps["vsc"]]
+
+    @staticmethod
+    def _agg_columns(
+        flag_count_df: pd.DataFrame, sc_count_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        df = flag_count_df.join(sc_count_df)
+        df[SC_COLS] = df[SC_COLS].fillna(0).astype(int)
+        df = df.rename(columns={"round_number": "round"}).reset_index()
         return df
