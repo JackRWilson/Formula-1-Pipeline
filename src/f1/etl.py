@@ -22,15 +22,16 @@ from f1.transform import (
     TransformCircuit,
     TransformConstructor,
     TransformDriver,
+    TransformDriverSessionTirePerformance,
     TransformLocation,
     TransformPitStops,
     TransformPracticeResult,
     TransformQualResult,
     TransformRace,
+    TransformRaceControlSummary,
     TransformRaceResult,
     TransformSeason,
     TransformWeatherSummary,
-    TransformRaceControlSummary
 )
 
 pd.set_option("display.max_columns", None)
@@ -61,9 +62,10 @@ class ETLProcessor:
         # qual_result_df = TransformQualResult().transform()
         # pit_stop_df = TransformPitStops().transform()
         # weather_sum_df = TransformWeatherSummary().transform()
-        race_control_df = TransformRaceControlSummary().transform()
-        print(race_control_df)
-        race_control_df.to_csv("test.csv", index=False)
+        # race_control_df = TransformRaceControlSummary().transform()
+        tire_perf_df = TransformDriverSessionTirePerformance().transform()
+        print(tire_perf_df)
+        tire_perf_df.to_csv("test.csv", index=False)
 
         print("ETL complete")
 

@@ -67,8 +67,22 @@ CIRCUIT_GENERIC_WORDS = {
     "e",
 }
 
+FASTF1_SESSION_KEYS = ["season_year", "round_number", "session_name"]
 BASIC_FLAGS = ["blue", "yellow", "double_yellow", "red"]
 SC_COLS = ["safety_car_count", "vsc_count", "safety_car_laps", "vsc_laps"]
+
+TIRE_GROUP_KEYS = [*FASTF1_SESSION_KEYS, "driver_code", "tire_compound"]
+TIRE_COMPOUNDS = ["SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET"]
+COMPOUND_MAPPING_2018 = {
+    "SUPERSOFT": "SOFT",
+    "HYPERSOFT": "SOFT",
+    "ULTRASOFT": "SOFT",
+    "SOFT": "MEDIUM",
+    "MEDIUM": "HARD",
+    "HARD": "HARD",
+}
+MIN_LAPS_FOR_DEGRADATION = 4
+LAP_TIME_QUANTILE_CUTOFF = 0.95
 
 # Blob layouts used by the shared blob-index helpers in blob_io.py.
 SESSION_RESULT_FOLDERS = (

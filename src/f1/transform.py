@@ -5,6 +5,7 @@ import unicodedata
 import numpy as np
 import pandas as pd
 from rapidfuzz import fuzz, process
+from sklearn.linear_model import LinearRegression
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
@@ -17,14 +18,18 @@ from f1.helpers.constants import (
     BASIC_FLAGS,
     CIRCUIT_FUZZY_SCORE_CUTOFF,
     CIRCUIT_GENERIC_WORDS,
+    COMPOUND_MAPPING_2018,
     CURATED_CIRCUITS_PATH,
     DATA_START_YEAR,
     F1SITE_MANIFEST_TABLE,
     FASTEST_LAP_FOLDERS,
+    FASTF1_SESSION_KEYS,
     FASTF1_SOURCE,
     JOLPI_DRIVER_COLUMNS,
     JOLPI_DRIVERS_SOURCE,
+    LAP_TIME_QUANTILE_CUTOFF,
     MAX_ROUNDS_BLOB,
+    MIN_LAPS_FOR_DEGRADATION,
     PHOTON_LOCATIONS_BLOB,
     PIT_STOP_FOLDERS,
     PRACTICE_FOLDERS,
@@ -34,6 +39,8 @@ from f1.helpers.constants import (
     SESSION_RESULT_FOLDERS,
     SESSION_SOURCE,
     STARTING_GRID_FOLDERS,
+    TIRE_COMPOUNDS,
+    TIRE_GROUP_KEYS,
     WIKIPEDIA_CIRCUITS_BLOB,
 )
 from f1.helpers.constructor_mapping import constructor_mapping
@@ -1059,7 +1066,7 @@ class TransformRaceControlSummary:
     def _count_flags(df: pd.DataFrame) -> pd.DataFrame:
         flag_cols = [f.lower().strip().replace("_", " ") for f in BASIC_FLAGS]
         counts = pd.crosstab(
-            [df[k] for k in ["season_year", "round_number", "session_name"]],
+            [df[k] for k in FASTF1_SESSION_KEYS],
             df["flag_norm"],
         ).reindex(columns=flag_cols, fill_value=0)
         counts.columns = [f"{c.replace(' ', '_')}_flag_count" for c in counts.columns]
@@ -1091,14 +1098,12 @@ class TransformRaceControlSummary:
         )
         results = {
             key: self._walk_sc_session(grp, race_end_lap[key])
-            for key, grp in sc.groupby(["season_year", "round_number", "session_name"])
+            for key, grp in sc.groupby(FASTF1_SESSION_KEYS)
         }
         return pd.DataFrame(
             list(results.values()),
             columns=SC_COLS,
-            index=pd.MultiIndex.from_tuples(
-                list(results), names=["season_year", "round_number", "session_name"]
-            ),
+            index=pd.MultiIndex.from_tuples(list(results), names=FASTF1_SESSION_KEYS),
         )
 
     @staticmethod
@@ -1130,3 +1135,92 @@ class TransformRaceControlSummary:
         df[SC_COLS] = df[SC_COLS].fillna(0).astype(int)
         df = df.rename(columns={"round_number": "round"}).reset_index()
         return df
+
+
+class TransformDriverSessionTirePerformance:
+    def transform(self) -> pd.DataFrame:
+        df = self._extract_laps()
+        df = self._filter_clean_laps(df)
+        df = self._normalize_compounds(df)
+        df = self._drop_slow_outliers(df)
+
+        tire_performance_df = self._agg_tire_stats(df)
+        return tire_performance_df
+
+    def _extract_laps(self) -> pd.DataFrame:
+        return load_blobs(
+            FASTF1_SOURCE,
+            {
+                "Driver",
+                "LapTime",
+                "LapNumber",
+                "Compound",
+                "TrackStatus",
+                "PitOutTime",
+                "PitInTime",
+                "IsAccurate",
+                "season_year",
+                "round_number",
+                "session_name",
+            },
+            filters={"kind": "laps"},
+        )
+
+    @staticmethod
+    def _filter_clean_laps(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.assign(
+            lap_time_seconds=pd.to_timedelta(df["LapTime"]).dt.total_seconds(),
+            driver_code=df["Driver"],
+        )
+        clean_lap_mask = (
+            (df["TrackStatus"] == "1")  # No flags
+            & df["PitOutTime"].isna()  # Not an out lap
+            & df["PitInTime"].isna()  # Not an in lap
+            & df["IsAccurate"].fillna(False).astype(bool)  # Full, accurate lap
+            & df["lap_time_seconds"].notna()
+        )
+        return df.loc[clean_lap_mask]
+
+    @staticmethod
+    def _normalize_compounds(df: pd.DataFrame) -> pd.DataFrame:
+        compound = df["Compound"].astype(str).str.upper().str.strip()
+        remapped_2018 = compound.map(COMPOUND_MAPPING_2018).fillna(compound)
+        return df.assign(
+            tire_compound=compound.where(df["season_year"] != 2018, remapped_2018)
+        ).loc[lambda d: d["tire_compound"].isin(TIRE_COMPOUNDS)]
+
+    @staticmethod
+    def _drop_slow_outliers(df: pd.DataFrame) -> pd.DataFrame:
+        cutoff = df.groupby([*FASTF1_SESSION_KEYS, "tire_compound"])[
+            "lap_time_seconds"
+        ].transform(lambda s: s.quantile(LAP_TIME_QUANTILE_CUTOFF))
+        return df.loc[df["lap_time_seconds"] <= cutoff]
+
+    def _agg_tire_stats(self, df: pd.DataFrame) -> pd.DataFrame:
+        grouped = df.groupby(TIRE_GROUP_KEYS)
+
+        stats = grouped.agg(
+            lap_count=("lap_time_seconds", "size"),
+            avg_pace_seconds=("lap_time_seconds", "mean"),
+            std_pace_seconds=("lap_time_seconds", lambda s: s.std(ddof=0)),
+        )
+        degradation_rate = grouped[["lap_time_seconds", "LapNumber"]].apply(
+            lambda g: self._get_degradation_rate(
+                g["lap_time_seconds"].to_numpy(dtype=float),
+                g["LapNumber"].to_numpy(dtype=float),
+            )
+        )
+        return stats.assign(degradation_rate=degradation_rate).reset_index()
+
+    @staticmethod
+    def _get_degradation_rate(lap_times: np.ndarray, lap_numbers: np.ndarray) -> float:
+        valid_mask = ~np.isnan(lap_times)
+        clean_lap_times = lap_times[valid_mask]
+        clean_lap_numbers = lap_numbers[valid_mask]
+
+        if len(clean_lap_times) < MIN_LAPS_FOR_DEGRADATION:
+            return np.nan
+        model = LinearRegression().fit(
+            clean_lap_numbers.reshape(-1, 1), clean_lap_times
+        )
+        return float(model.coef_[0])
