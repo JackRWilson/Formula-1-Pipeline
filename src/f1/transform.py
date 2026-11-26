@@ -1021,8 +1021,8 @@ class TransformWeatherSummary:
                 "session_name": "session_type",
             },
         ).drop(columns=["Time", "race_id", "event_name"], errors="ignore")
-        df["session_type"] = df["session_type"].rename(
-            "Sprint Shootout", "Sprint Qualifying"
+        df["session_type"] = df["session_type"].replace(
+            {"Sprint Shootout": "Sprint Qualifying"}
         )
         return df
 
@@ -1133,7 +1133,12 @@ class TransformRaceControlSummary:
     ) -> pd.DataFrame:
         df = flag_count_df.join(sc_count_df)
         df[SC_COLS] = df[SC_COLS].fillna(0).astype(int)
-        df = df.rename(columns={"round_number": "round"}).reset_index()
+        df = df.reset_index().rename(
+            columns={"round_number": "round", "session_name": "session_type"}
+        )
+        df["session_type"] = df["session_type"].replace(
+            {"Sprint Shootout": "Sprint Qualifying"}
+        )
         return df
 
 
@@ -1210,7 +1215,14 @@ class TransformDriverSessionTirePerformance:
                 g["LapNumber"].to_numpy(dtype=float),
             )
         )
-        return stats.assign(degradation_rate=degradation_rate).reset_index()
+        tire_df = stats.assign(degradation_rate=degradation_rate).reset_index()
+        tire_df = tire_df.rename(
+            columns={"round_number": "round", "session_name": "session_type"}
+        ).reset_index(drop=True)
+        tire_df["session_type"] = tire_df["session_type"].replace(
+            {"Sprint Shootout": "Sprint Qualifying"}
+        )
+        return tire_df
 
     @staticmethod
     def _get_degradation_rate(lap_times: np.ndarray, lap_numbers: np.ndarray) -> float:
