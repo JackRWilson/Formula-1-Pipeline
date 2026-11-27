@@ -14,6 +14,7 @@ class ConcatBlobFramesTests(unittest.TestCase):
         blob_index = pd.DataFrame(
             {
                 "blob_name": ["race/2018/1.parquet", "race/2018/2.parquet"],
+                "year": [2018, 2018],
                 "round": [1, 2],
             }
         )
@@ -22,9 +23,12 @@ class ConcatBlobFramesTests(unittest.TestCase):
             pd.DataFrame({"race_id": ["2018-2"]}),
         ]
 
-        result = concat_blob_frames(blob_index, {"race_id"}, add_round=True)
+        result = concat_blob_frames(
+            blob_index, {"race_id"}, add_year=True, add_round=True
+        )
 
         self.assertEqual(result["race_id"].tolist(), ["2018-1", "2018-2"])
+        self.assertEqual(result["year"].tolist(), [2018, 2018])
         self.assertEqual(result["round"].tolist(), [1, 2])
         self.assertEqual(get_blob.call_count, 2)
 

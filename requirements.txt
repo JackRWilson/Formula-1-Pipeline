@@ -13,3 +13,4 @@ azure-storage-blob
 pyarrow
 fastf1
 rapidfuzz
+pytest

@@ -6,6 +6,7 @@ __pycache__/
 .env
 /docs/dev/
 /src/f1.egg-info
+.vscode/
 
 # Logs and run state
 docs/logs.txt
