@@ -5,12 +5,6 @@ import pandas as pd
 LAP_TIME_PATTERN = re.compile(
     r"^(?P<gap>\+)?(?:(?P<minutes>\d+):)?(?P<seconds>\d+)\.(?P<fraction>\d+)s?$"
 )
-SESSION_MAP = {
-    "practice/0": "Practice 3",
-    "practice/1": "Practice 1",
-    "practice/2": "Practice 2",
-    "practice/3": "Practice 3",
-}
 
 
 def parse_lap_strings(raw: pd.Series) -> pd.DataFrame:

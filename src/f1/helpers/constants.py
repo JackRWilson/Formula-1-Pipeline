@@ -100,10 +100,13 @@ SESSION_BLOB_FOLDERS = SESSION_RESULT_FOLDERS + (
     "pit-stop-summary",
 )
 RACE_RESULT_FOLDERS = ("race-result",)
+SPRINT_RESULT_FOLDERS = ("sprint-results", "sprint-result")
 STARTING_GRID_FOLDERS = ("starting-grid",)
+SPRINT_GRID_FOLDERS = ("sprint-grid",)
 FASTEST_LAP_FOLDERS = ("fastest-laps",)
 PRACTICE_FOLDERS = ("practice",)
 QUALIFYING_FOLDERS = ("qualifying",)
+SPRINT_QUALIFYING_FOLDERS = ("sprint-qualifying",)
 PIT_STOP_FOLDERS = ("pit-stop-summary",)
 
 SESSION_BLOB_PATTERN = re.compile(

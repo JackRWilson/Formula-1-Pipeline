@@ -38,25 +38,60 @@ from f1.helpers.constants import (
     SC_COLS,
     SESSION_RESULT_FOLDERS,
     SESSION_SOURCE,
+    SPRINT_GRID_FOLDERS,
+    SPRINT_QUALIFYING_FOLDERS,
+    SPRINT_RESULT_FOLDERS,
     STARTING_GRID_FOLDERS,
     TIRE_COMPOUNDS,
     TIRE_GROUP_KEYS,
     WIKIPEDIA_CIRCUITS_BLOB,
 )
 from f1.helpers.constructor_mapping import constructor_mapping
-from f1.helpers.lap_times import SESSION_MAP, parse_lap_strings
+from f1.helpers.lap_times import parse_lap_strings
 from f1.helpers.text import normalize_text, normalized_key
 from f1.helpers.utils import clean_circuit_name
 
 logger = logging.getLogger(__name__)
 
-LOCATION_COLUMNS = [
+_LOCATION_COLUMNS = [
     "city",
     "country",
     "latitude",
     "longitude",
     "elevation_m",
 ]
+
+_SESSION_TYPE_ALIASES = {
+    "fp1": "practice_1",
+    "practice_1": "practice_1",
+    "fp2": "practice_2",
+    "practice_2": "practice_2",
+    "fp3": "practice_3",
+    "practice_3": "practice_3",
+    "practice_0": "practice_3",
+    "qualifying": "qualifying",
+    "sprint_qualifying": "sprint_qualifying",
+    "sprint_shootout": "sprint_qualifying",
+    "sprint": "sprint",
+    "sprint_grid": "sprint",
+    "race": "race",
+    "starting_grid": "race",
+}
+
+
+def _normalize_session_types(session_types: pd.Series) -> pd.Series:
+    source = (
+        session_types.astype("string")
+        .str.strip()
+        .str.casefold()
+        .str.replace(r"[\s\-/]+", "_", regex=True)
+    )
+    normalized = source.map(_SESSION_TYPE_ALIASES)
+    unknown = source.notna() & normalized.isna()
+    if unknown.any():
+        values = source.loc[unknown].unique().tolist()
+        raise ValueError(f"Unrecognized session types: {values}")
+    return normalized.astype("string")
 
 
 class TransformSeason:
@@ -159,7 +194,7 @@ class TransformLocation:
                 f"{conflicts.index.tolist()}"
             )
 
-        return data.drop_duplicates(key_columns)[LOCATION_COLUMNS].reset_index(
+        return data.drop_duplicates(key_columns)[_LOCATION_COLUMNS].reset_index(
             drop=True
         )
 
@@ -692,18 +727,18 @@ class TransformRaceResult:
     def transform(self) -> pd.DataFrame:
         results_df = self._extract_race_results()
         grid_df = self._extract_starting_grid()
-        fastest_df = self._extract_fastest_laps()
 
         results_df, grid_df = self._consolidate_columns(results_df, grid_df)
         results_df = self._join_starting_grid(results_df, grid_df)
         results_df = self._classify_end_position(results_df)
         results_df = self._normalize_team_names(results_df)
+        fastest_df = self._extract_fastest_laps(results_df)
         results_df = self._join_fastest_laps(results_df, fastest_df)
 
         return results_df
 
     def _extract_race_results(self) -> pd.DataFrame:
-        return load_blobs(
+        race_results = load_blobs(
             SESSION_SOURCE,
             {
                 "race_id",
@@ -713,12 +748,32 @@ class TransformRaceResult:
                 "driver_code",
                 "team_name",
                 "end_position",
+                "points",
                 "laps_completed",
             },
             folders=RACE_RESULT_FOLDERS,
-            filters={"session": "race-result"},
+            transform=lambda data: data.assign(session_type="race"),
             add_round=True,
         )
+        sprint_results = load_blobs(
+            SESSION_SOURCE,
+            {
+                "race_id",
+                "year",
+                "round",
+                "driver_name",
+                "driver_code",
+                "team_name",
+                "end_position",
+                "points",
+                "laps_completed",
+            },
+            folders=SPRINT_RESULT_FOLDERS,
+            transform=self._normalize_sprint_results,
+            add_year=True,
+            add_round=True,
+        )
+        return pd.concat([race_results, sprint_results], ignore_index=True)
 
     def _extract_starting_grid(self) -> pd.DataFrame:
         return load_blobs(
@@ -728,28 +783,139 @@ class TransformRaceResult:
                 "driver_name",
                 "team_name",
                 "start_position",
-                "round",
                 "driver_code",
+                "session_type",
             },
-            folders=STARTING_GRID_FOLDERS,
-            filters={"session": "starting-grid"},
+            folders=STARTING_GRID_FOLDERS + SPRINT_GRID_FOLDERS,
+            transform=self._normalize_grid_session_type,
             add_round=True,
         )
 
-    def _extract_fastest_laps(self) -> pd.DataFrame:
-        df = load_blobs(
+    @staticmethod
+    def _normalize_sprint_results(data: pd.DataFrame) -> pd.DataFrame:
+        return data.rename(columns={"sprint_position": "end_position"}).assign(
+            session_type="sprint"
+        )
+
+    @staticmethod
+    def _normalize_grid_session_type(data: pd.DataFrame) -> pd.DataFrame:
+        return data.assign(session_type=_normalize_session_types(data["session_type"]))
+
+    def _extract_fastest_laps(self, results_df: pd.DataFrame) -> pd.DataFrame:
+        race_fastest_laps = load_blobs(
             SESSION_SOURCE,
             {"race_id", "fastest_lap_time", "lap_number", "driver_code", "driver_name"},
             folders=FASTEST_LAP_FOLDERS,
-            filters={"session": "fastest-laps"},
+            transform=lambda data: data.assign(session_type="race"),
         )
-        df["fastest_lap_seconds"] = parse_lap_strings(df["fastest_lap_time"])["seconds"]
-        df["fastest_lap_number"] = pd.to_numeric(df["lap_number"]).astype("Int64")
-        return df[
+        race_fastest_laps["fastest_lap_seconds"] = parse_lap_strings(
+            race_fastest_laps["fastest_lap_time"]
+        )["seconds"]
+        race_fastest_laps["fastest_lap_number"] = pd.to_numeric(
+            race_fastest_laps["lap_number"]
+        ).astype("Int64")
+        race_fastest_laps = race_fastest_laps[
             [
                 "race_id",
-                "driver_name",
                 "driver_code",
+                "session_type",
+                "fastest_lap_seconds",
+                "fastest_lap_number",
+            ]
+        ]
+        sprint_fastest_laps = self._extract_fastf1_sprint_fastest_laps(results_df)
+        return pd.concat(
+            [race_fastest_laps, sprint_fastest_laps], ignore_index=True
+        ).drop_duplicates()
+
+    def _extract_fastf1_sprint_fastest_laps(
+        self, results_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        laps = load_blobs(
+            FASTF1_SOURCE,
+            {
+                "Driver",
+                "LapTime",
+                "LapNumber",
+                "TrackStatus",
+                "PitOutTime",
+                "PitInTime",
+                "IsAccurate",
+                "season_year",
+                "round_number",
+                "session_name",
+            },
+            filters={"kind": "laps", "session": "sprint"},
+        )
+        laps = laps.loc[
+            laps["session_name"].astype("string").str.casefold().eq("sprint")
+        ].copy()
+        laps["fastest_lap_seconds"] = pd.to_timedelta(
+            laps["LapTime"], errors="coerce"
+        ).dt.total_seconds()
+        valid_laps = (
+            laps["fastest_lap_seconds"].notna()
+            & laps["LapNumber"].notna()
+            & laps["Driver"].notna()
+            & laps["TrackStatus"].astype("string").eq("1")
+            & laps["PitOutTime"].isna()
+            & laps["PitInTime"].isna()
+            & laps["IsAccurate"].fillna(False).astype(bool)
+        )
+        if "Deleted" in laps.columns:
+            valid_laps &= ~laps["Deleted"].fillna(False).astype(bool)
+        laps = laps.loc[valid_laps].copy()
+        if laps.empty:
+            return pd.DataFrame(
+                columns=[
+                    "race_id",
+                    "driver_code",
+                    "session_type",
+                    "fastest_lap_seconds",
+                    "fastest_lap_number",
+                ]
+            )
+
+        race_ids = results_df[["race_id", "season_year", "round"]].drop_duplicates()
+        if race_ids.duplicated(["season_year", "round"]).any():
+            raise ValueError("Multiple race IDs found for the same season and round")
+        laps = laps.merge(
+            race_ids,
+            left_on=["season_year", "round_number"],
+            right_on=["season_year", "round"],
+            how="left",
+            validate="many_to_one",
+        )
+        unmapped = laps["race_id"].isna()
+        if unmapped.any():
+            event_keys = (
+                laps.loc[unmapped, ["season_year", "round_number"]]
+                .drop_duplicates()
+                .to_dict("records")
+            )
+            raise ValueError(
+                f"Could not map FastF1 sprint laps to race IDs: {event_keys}"
+            )
+
+        fastest = (
+            laps.sort_values("fastest_lap_seconds", kind="stable")
+            .drop_duplicates(["race_id", "Driver"])
+            .rename(
+                columns={
+                    "Driver": "driver_code",
+                    "LapNumber": "fastest_lap_number",
+                }
+            )
+        )
+        fastest["fastest_lap_number"] = pd.to_numeric(
+            fastest["fastest_lap_number"]
+        ).astype("Int64")
+        fastest["session_type"] = "sprint"
+        return fastest[
+            [
+                "race_id",
+                "driver_code",
+                "session_type",
                 "fastest_lap_seconds",
                 "fastest_lap_number",
             ]
@@ -769,6 +935,7 @@ class TransformRaceResult:
                 "end_position",
                 "points",
                 "laps_completed",
+                "session_type",
             ]
         ]
         results_df = results_df.rename(
@@ -779,8 +946,12 @@ class TransformRaceResult:
             }
         )
 
-        grid_df = grid_df.drop(columns=["session_type"])
-        grid_df = grid_df.rename(columns={"team_name": "constructor_name"})
+        grid_df = grid_df.rename(
+            columns={
+                "team_name": "constructor_name",
+                "start_position": "starting_position",
+            }
+        )
 
         return results_df, grid_df
 
@@ -789,7 +960,14 @@ class TransformRaceResult:
     ) -> pd.DataFrame:
         return results_df.merge(
             grid_df,
-            on=["race_id", "round", "driver_name", "driver_code", "constructor_name"],
+            on=[
+                "race_id",
+                "round",
+                "driver_name",
+                "driver_code",
+                "constructor_name",
+                "session_type",
+            ],
             how="left",
         )
 
@@ -821,7 +999,10 @@ class TransformRaceResult:
         self, results_df: pd.DataFrame, fastest_df: pd.DataFrame
     ) -> pd.DataFrame:
         return results_df.merge(
-            fastest_df, on=["race_id", "driver_name", "driver_code"]
+            fastest_df,
+            on=["race_id", "driver_code", "session_type"],
+            how="left",
+            validate="one_to_one",
         )
 
 
@@ -871,7 +1052,7 @@ class TransformPracticeResult:
         if not bad.empty:
             raise ValueError(f"Sessions without exactly one base time:\n{bad}")
 
-        df["session_type"] = df["session_type"].map(SESSION_MAP)
+        df["session_type"] = _normalize_session_types(df["session_type"])
         df = df.rename(columns={"lap_seconds": "best_lap_seconds"})
         return df.drop(columns=["lap_time", "round"])
 
@@ -912,9 +1093,9 @@ class TransformQualResult:
                 "qual_position",
                 "qual_laps",
                 "driver_code",
+                "session_type",
             },
-            folders=QUALIFYING_FOLDERS,
-            filters={"session": "qualifying"},
+            folders=QUALIFYING_FOLDERS + SPRINT_QUALIFYING_FOLDERS,
         )
         df = df.rename(
             columns={
@@ -925,7 +1106,8 @@ class TransformQualResult:
                 "qual_position": "qualifying_position",
                 "qual_laps": "qualifying_laps",
             }
-        ).drop(columns=["session_type"])
+        )
+        df["session_type"] = _normalize_session_types(df["session_type"])
         return df
 
     def _convert_time_to_seconds(self, qual_df: pd.DataFrame) -> pd.DataFrame:
@@ -1021,9 +1203,7 @@ class TransformWeatherSummary:
                 "session_name": "session_type",
             },
         ).drop(columns=["Time", "race_id", "event_name"], errors="ignore")
-        df["session_type"] = df["session_type"].replace(
-            {"Sprint Shootout": "Sprint Qualifying"}
-        )
+        df["session_type"] = _normalize_session_types(df["session_type"])
         return df
 
 
@@ -1040,7 +1220,7 @@ class TransformRaceControlSummary:
         return race_control_df
 
     def _extract_messages(self) -> pd.DataFrame:
-        return load_blobs(
+        df = load_blobs(
             FASTF1_SOURCE,
             {
                 "Time",
@@ -1055,6 +1235,8 @@ class TransformRaceControlSummary:
             },
             filters={"kind": "messages"},
         )
+        df["session_name"] = _normalize_session_types(df["session_name"])
+        return df
 
     @staticmethod
     def _normalize_flags(flags: pd.Series) -> pd.Series:
@@ -1136,9 +1318,6 @@ class TransformRaceControlSummary:
         df = df.reset_index().rename(
             columns={"round_number": "round", "session_name": "session_type"}
         )
-        df["session_type"] = df["session_type"].replace(
-            {"Sprint Shootout": "Sprint Qualifying"}
-        )
         return df
 
 
@@ -1153,7 +1332,7 @@ class TransformDriverSessionTirePerformance:
         return tire_performance_df
 
     def _extract_laps(self) -> pd.DataFrame:
-        return load_blobs(
+        df = load_blobs(
             FASTF1_SOURCE,
             {
                 "Driver",
@@ -1170,6 +1349,8 @@ class TransformDriverSessionTirePerformance:
             },
             filters={"kind": "laps"},
         )
+        df["session_name"] = _normalize_session_types(df["session_name"])
+        return df
 
     @staticmethod
     def _filter_clean_laps(df: pd.DataFrame) -> pd.DataFrame:
@@ -1219,9 +1400,6 @@ class TransformDriverSessionTirePerformance:
         tire_df = tire_df.rename(
             columns={"round_number": "round", "session_name": "session_type"}
         ).reset_index(drop=True)
-        tire_df["session_type"] = tire_df["session_type"].replace(
-            {"Sprint Shootout": "Sprint Qualifying"}
-        )
         return tire_df
 
     @staticmethod

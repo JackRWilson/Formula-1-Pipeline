@@ -134,6 +134,7 @@ def concat_blob_frames(
     blob_index: pd.DataFrame,
     required_columns: set,
     transform: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
+    add_year: bool = False,
     add_round: bool = False,
 ) -> pd.DataFrame:
     frames = []
@@ -141,6 +142,8 @@ def concat_blob_frames(
         df = get_blob(row.blob_name)
         if transform is not None:
             df = transform(df)
+        if add_year:
+            df["year"] = row.year
         if add_round:
             df["round"] = row.round
         require_columns(df, required_columns, row.blob_name)
@@ -167,6 +170,7 @@ def load_blobs(
     folders: tuple[str, ...] | None = None,
     filters: Mapping[str, object] | None = None,
     transform: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
+    add_year: bool = False,
     add_round: bool = False,
     min_year: int | None = DATA_START_YEAR,
     container_client: ContainerClient | None = None,
@@ -179,5 +183,6 @@ def load_blobs(
         blob_index,
         required_columns,
         transform=transform,
+        add_year=add_year,
         add_round=add_round,
     )
